@@ -2089,7 +2089,6 @@ func (rl *clientConnReadLoop) run() error {
 	cc := rl.cc
 	rl.closeWhenIdle = cc.t.disableKeepAlives() || cc.singleUse
 	gotReply := false // ever saw a HEADERS reply
-	gotSettings := false
 	readIdleTimeout := cc.t.ReadIdleTimeout
 	var t *time.Timer
 	if readIdleTimeout != 0 {
@@ -2120,14 +2119,6 @@ func (rl *clientConnReadLoop) run() error {
 		}
 		if VerboseLogs {
 			cc.vlogf("http2: Transport received %s", summarizeFrame(f))
-		}
-		if !gotSettings {
-			if _, ok := f.(*SettingsFrame); !ok {
-				cc.logf("protocol error: received %T before a SETTINGS frame", f)
-
-				return ConnectionError(ErrCodeProtocol)
-			}
-			gotSettings = true
 		}
 		maybeIdle := false // whether frame might transition us to idle
 
