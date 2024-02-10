@@ -29,7 +29,7 @@ import (
 	"strconv"
 	"strings"
 
-	http "github.com/bogdanfinn/fhttp"
+	http "github.com/Noooste/fhttp"
 
 	"golang.org/x/net/http/httpguts"
 )
@@ -91,10 +91,11 @@ func (h *Handler) stderr() io.Writer {
 
 // removeLeadingDuplicates remove leading duplicate in environments.
 // It's possible to override environment like following.
-//    cgi.Handler{
-//      ...
-//      Env: []string{"SCRIPT_FILENAME=foo.php"},
-//    }
+//
+//	cgi.Handler{
+//	  ...
+//	  Env: []string{"SCRIPT_FILENAME=foo.php"},
+//	}
 func removeLeadingDuplicates(env []string) (ret []string) {
 	for i, e := range env {
 		found := false

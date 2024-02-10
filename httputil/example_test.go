@@ -11,9 +11,9 @@ import (
 	"net/url"
 	"strings"
 
-	http "github.com/bogdanfinn/fhttp"
-	"github.com/bogdanfinn/fhttp/httptest"
-	"github.com/bogdanfinn/fhttp/httputil"
+	http "github.com/Noooste/fhttp"
+	"github.com/Noooste/fhttp/httptest"
+	"github.com/Noooste/fhttp/httputil"
 )
 
 func ExampleDumpRequest() {
