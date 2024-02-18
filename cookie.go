@@ -358,9 +358,11 @@ func sanitizeCookieName(n string) string {
 // https://tools.ietf.org/html/rfc6265#section-4.1.1
 // cookie-value      = *cookie-octet / ( DQUOTE *cookie-octet DQUOTE )
 // cookie-octet      = %x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E
-//           ; US-ASCII characters excluding CTLs,
-//           ; whitespace DQUOTE, comma, semicolon,
-//           ; and backslash
+//
+//	; US-ASCII characters excluding CTLs,
+//	; whitespace DQUOTE, comma, semicolon,
+//	; and backslash
+//
 // We loosen this as spaces and commas are common in cookie Values
 // but we produce a quoted cookie-value if and only if v contains
 // commas or spaces.
@@ -417,8 +419,8 @@ func sanitizeOrWarn(fieldName string, valid func(byte) bool, v string) string {
 }
 
 func parseCookieValue(raw string, allowDoubleQuote bool) (string, bool) {
-	// Strip the quotes, if present.
-	if allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+	// If not allowing double quotes to wrap the cookie value, then strip them
+	if !allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
 		raw = raw[1 : len(raw)-1]
 	}
 	for i := 0; i < len(raw); i++ {
