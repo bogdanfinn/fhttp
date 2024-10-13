@@ -615,7 +615,9 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 	}
 
 	if _, ok := r.Header["Host"]; !ok {
-		r.Header.Set("Host", host)
+		if _, ok := r.Header["host"]; !ok {
+			r.Header.Set("Host", host)
+		}
 	}
 
 	// if user agent field is not present, add it
