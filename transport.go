@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 
 	tls "github.com/bogdanfinn/utls"
 
@@ -1791,7 +1792,6 @@ var _ io.ReaderFrom = (*persistConnWriter)(nil)
 //	socks5://proxy.com|https|foo.com  socks5 to proxy, then https to foo.com
 //	https://proxy.com|https|foo.com   https to proxy, then CONNECT to foo.com
 //	https://proxy.com|http            https to proxy, http to anywhere after that
-//
 type connectMethod struct {
 	_            incomparable
 	proxyURL     *url.URL // nil for no proxy, else full proxy URL
@@ -2567,6 +2567,11 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 		req.extraHeaders().Set("Accept-Encoding", "gzip, deflate, br")
 	}
 
+	// Set gzip to true if the caller's Accept-Encoding includes gzip.
+	if strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+		requestedGzip = true
+	}
+
 	var continueCh chan struct{}
 	if req.ProtoAtLeast(1, 1) && req.Body != nil && req.expectsContinue() {
 		continueCh = make(chan struct{}, 1)
@@ -2887,6 +2892,10 @@ func DecompressBodyByType(body io.ReadCloser, contentType string) io.ReadCloser 
 		}
 	case "deflate":
 		return identifyDeflate(body)
+	case "zstd":
+		return &zstdReader{
+			body: body,
+		}
 	default:
 		return body
 	}
@@ -2987,6 +2996,37 @@ func (dr *deflateReader) Read(p []byte) (n int, err error) {
 
 func (dr *deflateReader) Close() error {
 	return dr.r.Close()
+}
+
+// zstdReader wraps a response body so it can lazily
+// call zstd.NewReader on the first call to Read
+type zstdReader struct {
+	body io.ReadCloser // underlying Response.Body
+	zr   *zstd.Decoder // lazily-initialized zstd reader
+	zerr error         // sticky error
+}
+
+func (zs *zstdReader) Read(p []byte) (n int, err error) {
+	if zs.zerr != nil {
+		return 0, zs.zerr
+	}
+	if zs.zr == nil {
+		zs.zr, err = zstd.NewReader(zs.body)
+		if err != nil {
+			zs.zerr = err
+			return 0, err
+		}
+	}
+	return zs.zr.Read(p)
+}
+
+func (zs *zstdReader) Close() error {
+	if zs.zr != nil {
+		zs.zr.Close() // zs.zr.Close() does not return a value, hence it's not checked for an error
+	}
+
+	// Close body and return error
+	return zs.body.Close()
 }
 
 const (
