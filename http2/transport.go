@@ -39,9 +39,9 @@ import (
 
 const (
 	defaultUserAgent = "Go-http-client/2.0"
-	// transportDefaultConnFlow is how many connection-level flow control
+	// TransportDefaultConnFlow is how many connection-level flow control
 	// tokens we give the server at start-up, past the default 64k.
-	transportDefaultConnFlow = 15663105
+	TransportDefaultConnFlow = 15663105
 
 	// transportDefaultStreamFlow is how many stream-level flow
 	// control tokens we announce to the peer, and how many bytes
@@ -328,7 +328,7 @@ type ClientConn struct {
 	idleTimeout time.Duration // or 0 for never
 	idleTimer   *time.Timer
 
-	inflow            flow // peer's conn-level flow control
+	inflow            http2inflow // peer's conn-level flow control
 	initialWindowSize uint32
 
 	lastActive           time.Time
@@ -376,8 +376,8 @@ type clientStream struct {
 	flow         flow // guarded by cc.mu
 	gotEndStream bool // got frame with END_STREAM flag set
 	ID           uint32
-	inflow       flow  // guarded by cc.mu
-	num1xx       uint8 // number of 1xx responses seen
+	inflow       http2inflow // guarded by cc.mu
+	num1xx       uint8       // number of 1xx responses seen
 
 	on100 func() // optional code to run if get a 100 continue response
 
@@ -754,16 +754,41 @@ func (t *Transport) NewClientConn(c net.Conn) (*ClientConn, error) {
 }
 
 func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*ClientConn, error) {
+	initialWindowSize := initialWindowSize
+	maxFrameSize := 16 << 10
+	maxConcurrentStreams := 1000
+	maxHeaderListSize := 2 ^ 64 - 1
+
+	setInitialWindowSize, ok := t.Settings[SettingInitialWindowSize]
+	if ok {
+		initialWindowSize = int(setInitialWindowSize)
+	}
+
+	setMaxFrameSize, ok := t.Settings[SettingMaxFrameSize]
+	if ok {
+		maxFrameSize = int(setMaxFrameSize)
+	}
+
+	setMaxConcurrentStreams, ok := t.Settings[SettingMaxConcurrentStreams]
+	if ok {
+		maxConcurrentStreams = int(setMaxConcurrentStreams)
+	}
+
+	setMaxHeaderListSize, ok := t.Settings[SettingMaxHeaderListSize]
+	if ok {
+		maxHeaderListSize = int(setMaxHeaderListSize)
+	}
+
 	cc := &ClientConn{
 		t:                     t,
 		tconn:                 c,
 		dialedAddr:            addr,
 		readerDone:            make(chan struct{}),
 		nextStreamID:          1,
-		maxFrameSize:          16 << 10,           // spec default
-		initialWindowSize:     65535,              // spec default
-		maxConcurrentStreams:  1000,               // "infinite", per spec. 1000 seems good enough.
-		peerMaxHeaderListSize: 0xffffffffffffffff, // "infinite", per spec. Use 2^64-1 instead.
+		maxFrameSize:          uint32(maxFrameSize),         // spec default
+		initialWindowSize:     uint32(initialWindowSize),    // spec default
+		maxConcurrentStreams:  uint32(maxConcurrentStreams), // "infinite", per spec. 1000 seems good enough.
+		peerMaxHeaderListSize: uint64(maxHeaderListSize),    // "infinite", per spec. Use 2^64-1 instead.
 		streams:               make(map[uint32]*clientStream),
 		singleUse:             singleUse,
 		wantSettingsAck:       true,
@@ -849,7 +874,9 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 		cc.nextStreamID = priority.StreamID + 2
 	}
 
-	cc.inflow.add(transportDefaultConnFlow + initialWindowSize)
+	//cc.inflow.add(transportDefaultConnFlow + initialWindowSize)
+
+	cc.inflow.add(int(t.ConnectionFlow) + initialWindowSize)
 	cc.bw.Flush()
 	if cc.werr != nil {
 		cc.Close()
@@ -1968,8 +1995,8 @@ func (cc *ClientConn) newStreamWithID(streamID uint32, incNext bool) *clientStre
 	}
 	cs.flow.add(int32(cc.initialWindowSize))
 	cs.flow.setConnFlow(&cc.flow)
-	cs.inflow.add(transportDefaultStreamFlow)
-	cs.inflow.setConnFlow(&cc.inflow)
+	cs.inflow.add(int(cc.initialWindowSize))
+	//cs.inflow.setConnFlow(&cc.inflow)
 	cc.streams[cs.ID] = cs
 
 	if incNext {
@@ -2009,14 +2036,16 @@ func (cc *ClientConn) streamByID(id uint32, andRemove bool) *clientStream {
 
 // clientConnReadLoop is the state owned by the clientConn's frame-reading readLoop.
 type clientConnReadLoop struct {
-	_             incomparable
-	cc            *ClientConn
-	closeWhenIdle bool
+	_                 incomparable
+	cc                *ClientConn
+	closeWhenIdle     bool
+	connectionFlow    int32
+	initialWindowSize int
 }
 
 // readLoop runs in its own goroutine and reads and dispatches frames.
 func (cc *ClientConn) readLoop() {
-	rl := &clientConnReadLoop{cc: cc}
+	rl := &clientConnReadLoop{cc: cc, connectionFlow: int32(cc.t.ConnectionFlow), initialWindowSize: int(cc.t.InitialWindowSize)}
 	defer rl.cleanup()
 	cc.readerErr = rl.run()
 	if ce, ok := cc.readerErr.(ConnectionError); ok {
@@ -2331,7 +2360,7 @@ func (rl *clientConnReadLoop) handleResponse(cs *clientStream, f *MetaHeadersFra
 
 	cs.bufPipe = pipe{b: &dataBuffer{expected: res.ContentLength}}
 	cs.bytesRemain = res.ContentLength
-	res.Body = transportResponseBody{cs}
+	res.Body = transportResponseBody{cs: cs, connectionFlow: rl.connectionFlow, initialWindowSize: rl.initialWindowSize}
 	go cs.awaitRequestCancel(cs.req)
 
 	// Make the behavior similar to http1. If DisableCompression is true,
@@ -2376,7 +2405,9 @@ func (rl *clientConnReadLoop) processTrailers(cs *clientStream, f *MetaHeadersFr
 // Response.Body. It is an io.ReadCloser. On Read, it reads from cs.body.
 // On Close it sends RST_STREAM if EOF wasn't already seen.
 type transportResponseBody struct {
-	cs *clientStream
+	cs                *clientStream
+	connectionFlow    int32
+	initialWindowSize int
 }
 
 func (b transportResponseBody) Read(p []byte) (n int, err error) {
@@ -2412,37 +2443,32 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 	}
 
 	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
-	var connAdd, streamAdd int32
-	// Check the conn-level first, before the stream-level.
-	if v := cc.inflow.available(); v < transportDefaultConnFlow/2 {
-		connAdd = transportDefaultConnFlow - v
-		cc.inflow.add(connAdd)
-	}
+	connAdd := cc.inflow.add(n)
+	var streamAdd int32
 	if err == nil { // No need to refresh if the stream is over or failed.
-		// Consider any buffered body data (read from the conn but not
-		// consumed by the client) when computing flow control for this
-		// stream.
-		v := int(cs.inflow.available()) + cs.bufPipe.Len()
-		if v < transportDefaultStreamFlow-transportDefaultStreamMinRefresh {
-			streamAdd = int32(transportDefaultStreamFlow - v)
-			cs.inflow.add(streamAdd)
-		}
+		streamAdd = cs.inflow.add(n)
 	}
+	cc.mu.Unlock()
+
 	if connAdd != 0 || streamAdd != 0 {
 		cc.wmu.Lock()
 		defer cc.wmu.Unlock()
 		if connAdd != 0 {
-			cc.fr.WriteWindowUpdate(0, mustUint31(connAdd))
+			cc.fr.WriteWindowUpdate(0, http2mustUint31(connAdd))
 		}
 		if streamAdd != 0 {
-			cc.fr.WriteWindowUpdate(cs.ID, mustUint31(streamAdd))
+			cc.fr.WriteWindowUpdate(cs.ID, http2mustUint31(streamAdd))
 		}
 		cc.bw.Flush()
 	}
-
 	return
+}
+
+func http2mustUint31(v int32) uint32 {
+	if v < 0 || v > 2147483647 {
+		panic("out of range")
+	}
+	return uint32(v)
 }
 
 var errClosedResponseBody = errors.New("http2: response body closed")
@@ -2463,7 +2489,7 @@ func (b transportResponseBody) Close() error {
 		}
 		// Return connection-level flow control.
 		if unread > 0 {
-			cc.inflow.add(int32(unread))
+			cc.inflow.add(unread)
 			cc.fr.WriteWindowUpdate(0, uint32(unread))
 		}
 		cc.bw.Flush()
@@ -2501,7 +2527,7 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 		// But at least return their flow control:
 		if f.Length > 0 {
 			cc.mu.Lock()
-			cc.inflow.add(int32(f.Length))
+			cc.inflow.add(int(f.Length))
 			cc.mu.Unlock()
 
 			cc.wmu.Lock()
@@ -2536,12 +2562,9 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 		}
 		// Check connection-level flow control.
 		cc.mu.Lock()
-		if cs.inflow.available() >= int32(f.Length) {
-			cs.inflow.take(int32(f.Length))
-		} else {
+		if !http2takeInflows(&cc.inflow, &cs.inflow, f.Length) {
 			cc.mu.Unlock()
-
-			return ConnectionError(ErrCodeFlowControl)
+			return http2ConnectionError(ErrCodeFlowControl)
 		}
 		// Return any padded flow control now, since we won't
 		// refund it later on body reads.
@@ -2556,11 +2579,11 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 			refund += len(data)
 		}
 		if refund > 0 {
-			cc.inflow.add(int32(refund))
+			cc.inflow.add(refund)
 			cc.wmu.Lock()
 			cc.fr.WriteWindowUpdate(0, uint32(refund))
 			if !didReset {
-				cs.inflow.add(int32(refund))
+				cs.inflow.add(refund)
 				cc.fr.WriteWindowUpdate(cs.ID, uint32(refund))
 			}
 			cc.bw.Flush()
@@ -2582,6 +2605,26 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 	}
 
 	return nil
+}
+
+// ConnectionError is an error that results in the termination of the
+// entire connection.
+type http2ConnectionError ErrCode
+
+func (e http2ConnectionError) Error() string {
+	return fmt.Sprintf("connection error: %s", ErrCode(e))
+}
+
+// takeInflows attempts to take n bytes from two inflows,
+// typically connection-level and stream-level flows.
+// It reports whether both windows have available capacity.
+func http2takeInflows(f1, f2 *http2inflow, n uint32) bool {
+	if n > uint32(f1.avail) || n > uint32(f2.avail) {
+		return false
+	}
+	f1.avail -= int32(n)
+	f2.avail -= int32(n)
+	return true
 }
 
 func (rl *clientConnReadLoop) endStream(cs *clientStream) {
