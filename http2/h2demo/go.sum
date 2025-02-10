@@ -639,6 +639,7 @@ github.com/bogdanfinn/utls v1.6.0/go.mod h1:VXIbRZaiY/wHZc6Hu+DZ4O2CgTzjhjCg/Ou3
 github.com/bogdanfinn/utls v1.6.1/go.mod h1:VXIbRZaiY/wHZc6Hu+DZ4O2CgTzjhjCg/Ou3V4r/39Y=
 github.com/bogdanfinn/utls v1.6.2/go.mod h1:czcHxHGsc1q9NjgWSeSinQZzn6MR76zUmGVIGanSXO0=
 github.com/bogdanfinn/utls v1.6.4/go.mod h1:czcHxHGsc1q9NjgWSeSinQZzn6MR76zUmGVIGanSXO0=
+github.com/bogdanfinn/utls v1.6.5/go.mod h1:czcHxHGsc1q9NjgWSeSinQZzn6MR76zUmGVIGanSXO0=
 github.com/boombuler/barcode v1.0.0/go.mod h1:paBWMcWSl3LHKBqUq+rly7CNSldXjb2rDl3JlRe0mD8=
 github.com/boombuler/barcode v1.0.1/go.mod h1:paBWMcWSl3LHKBqUq+rly7CNSldXjb2rDl3JlRe0mD8=
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625/go.mod h1:HYsPBTaaSFSlLx/70C2HPIMNZpVV8+vt/A+FMnYP11g=
