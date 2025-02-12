@@ -1801,7 +1801,13 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 		}
 
 		for _, kv := range kvs {
-			if strings.EqualFold(kv.Key, "host") {
+			if len(kv.Values) == 0 {
+				// feat: skip empty headers
+				// for skip auto headers
+				// header["User-Agent"] = make([]string, 0)
+				// header["User-Agent"] = []string{}
+				continue
+			} else if strings.EqualFold(kv.Key, "host") {
 				// Host is :authority, already sent.
 				continue
 			} else if strings.EqualFold(kv.Key, "connection") || strings.EqualFold(kv.Key, "proxy-connection") ||
