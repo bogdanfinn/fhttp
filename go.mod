@@ -1,4 +1,4 @@
-module github.com/PandaWorker/fhttp
+module github.com/bogdanfinn/fhttp
 
 go 1.22.0
 
