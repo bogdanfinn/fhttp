@@ -2474,33 +2474,6 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 	}
 
 	return
-	/*
-		connAdd := cc.inflow.add(n)
-		var streamAdd int32
-		if err == nil { // No need to refresh if the stream is over or failed.
-			streamAdd = cs.inflow.add(n)
-		}
-		cc.mu.Unlock()
-
-		if connAdd != 0 || streamAdd != 0 {
-			cc.wmu.Lock()
-			defer cc.wmu.Unlock()
-			if connAdd != 0 {
-				cc.fr.WriteWindowUpdate(0, http2mustUint31(connAdd))
-			}
-			if streamAdd != 0 {
-				cc.fr.WriteWindowUpdate(cs.ID, http2mustUint31(streamAdd))
-			}
-			cc.bw.Flush()
-		}
-		return*/
-}
-
-func http2mustUint31(v int32) uint32 {
-	if v < 0 || v > 2147483647 {
-		panic("out of range")
-	}
-	return uint32(v)
 }
 
 var errClosedResponseBody = errors.New("http2: response body closed")
