@@ -2615,26 +2615,6 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 	return nil
 }
 
-// ConnectionError is an error that results in the termination of the
-// entire connection.
-type http2ConnectionError ErrCode
-
-func (e http2ConnectionError) Error() string {
-	return fmt.Sprintf("connection error: %s", ErrCode(e))
-}
-
-// takeInflows attempts to take n bytes from two inflows,
-// typically connection-level and stream-level flows.
-// It reports whether both windows have available capacity.
-func http2takeInflows(f1, f2 *http2inflow, n uint32) bool {
-	if n > uint32(f1.avail) || n > uint32(f2.avail) {
-		return false
-	}
-	f1.avail -= int32(n)
-	f2.avail -= int32(n)
-	return true
-}
-
 func (rl *clientConnReadLoop) endStream(cs *clientStream) {
 	// TODO: check that any declared content-length matches, like
 	// server.go's (*stream).endStream method.
