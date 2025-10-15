@@ -374,7 +374,7 @@ func sanitizeCookieValue(v string, quoted bool) string {
 	if len(v) == 0 {
 		return v
 	}
-	if strings.ContainsAny(v, " ,") || quoted {
+	if strings.Contains(v, " ") || quoted {
 		return `"` + v + `"`
 	}
 	return v
