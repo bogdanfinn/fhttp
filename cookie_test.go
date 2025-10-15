@@ -496,7 +496,7 @@ func TestCookieSanitizeValue(t *testing.T) {
 		{"a,", `"a,"`},
 	}
 	for _, tt := range tests {
-		if got := sanitizeCookieValue(tt.in); got != tt.want {
+		if got := sanitizeCookieValue(tt.in, false); got != tt.want {
 			t.Errorf("sanitizeCookieValue(%q) = %q; want %q", tt.in, got, tt.want)
 		}
 	}
