@@ -2434,9 +2434,9 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 		// Consider any buffered body data (read from the conn but not
 		// consumed by the client) when computing flow control for this
 		// stream.
-		v := int(cs.inflow.available()) + cs.bufPipe.Len()
-		if v < transportDefaultStreamFlow-transportDefaultStreamMinRefresh {
-			streamAdd = int32(transportDefaultStreamFlow - v)
+		unsent := transportDefaultStreamFlow - int(cs.inflow.available()) + cs.bufPipe.Len()
+		if unsent > transportDefaultStreamMinRefresh && unsent > transportDefaultStreamFlow/2 {
+			streamAdd = int32(unsent)
 			cs.inflow.add(streamAdd)
 		}
 	}
