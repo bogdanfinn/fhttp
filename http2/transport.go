@@ -62,7 +62,7 @@ type Transport struct {
 	// AllowHTTP, if true, permits HTTP/2 requests using the insecure,
 	// plain-text "http" scheme. Note that this does not enable h2c support.
 	AllowHTTP bool
-
+	InitialStreamID uint32
 	ConnectionFlow uint32
 
 	// ConnPool optionally specifies an alternate connection pool to use.
@@ -803,6 +803,12 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 	if t.AllowHTTP {
 		cc.nextStreamID = 3
 	}
+
+	// [ADD THIS BLOCK]
+	if t.InitialStreamID != 0 {
+		cc.nextStreamID = t.InitialStreamID
+	}
+	// [END ADD BLOCK]
 
 	if cs, ok := c.(connectionStater); ok {
 		state := cs.ConnectionState()
@@ -2422,37 +2428,60 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 	}
 
 	cc.mu.Lock()
-	defer cc.mu.Unlock()
+    defer cc.mu.Unlock()
 
-	var connAdd, streamAdd int32
-	// Check the conn-level first, before the stream-level.
-	if v := cc.inflow.available(); v < transportDefaultConnFlow/2 {
-		connAdd = transportDefaultConnFlow - v
-		cc.inflow.add(connAdd)
-	}
-	if err == nil { // No need to refresh if the stream is over or failed.
-		// Consider any buffered body data (read from the conn but not
-		// consumed by the client) when computing flow control for this
-		// stream.
-		unsent := transportDefaultStreamFlow - int(cs.inflow.available()) + cs.bufPipe.Len()
-		if unsent > transportDefaultStreamMinRefresh && unsent > transportDefaultStreamFlow/2 {
-			streamAdd = int32(unsent)
-			cs.inflow.add(streamAdd)
-		}
-	}
-	if connAdd != 0 || streamAdd != 0 {
-		cc.wmu.Lock()
-		defer cc.wmu.Unlock()
-		if connAdd != 0 {
-			cc.fr.WriteWindowUpdate(0, mustUint31(connAdd))
-		}
-		if streamAdd != 0 {
-			cc.fr.WriteWindowUpdate(cs.ID, mustUint31(streamAdd))
-		}
-		cc.bw.Flush()
-	}
+    var connAdd, streamAdd int32
+    // Check the conn-level first, before the stream-level.
+    if v := cc.inflow.available(); v < transportDefaultConnFlow/2 {
+        connAdd = transportDefaultConnFlow - v
+        cc.inflow.add(connAdd)
+    }
+    if err == nil { // No need to refresh if the stream is over or failed.
+        // Consider any buffered body data (read from the conn but not
+        // consumed by the client) when computing flow control for this
+        // stream.
+        unsent := transportDefaultStreamFlow - int(cs.inflow.available()) + cs.bufPipe.Len()
+        
+        // [MODIFIED LOGIC START]
+        // We lower the threshold for sending updates.
+        // Original logic: update if unsent > 4KB AND unsent > 2MB (transportDefaultStreamFlow/2)
+        // New logic: update if unsent > 16KB (or whatever minimum you want to be safe).
+        // This ensures we send updates much frequently even if the total window is small.
+        
+        const aggressiveThreshold = 16384 // 16KB
 
-	return
+        // If the user provided a small InitialWindowSize (like Firefox's 128KB), 
+        // the standard logic (waiting for 2MB consumption) will NEVER trigger, causing the stall.
+        // We check if the configured initial window is small.
+        isSmallWindow := cc.initialWindowSize < 1048576 // < 1MB
+
+        if isSmallWindow {
+            if unsent > aggressiveThreshold {
+                streamAdd = int32(unsent)
+                cs.inflow.add(streamAdd)
+            }
+        } else {
+             // Fallback to standard behavior for large windows (Chrome)
+             if unsent > transportDefaultStreamMinRefresh && unsent > transportDefaultStreamFlow/2 {
+                streamAdd = int32(unsent)
+                cs.inflow.add(streamAdd)
+            }
+        }
+        // [MODIFIED LOGIC END]
+    }
+    if connAdd != 0 || streamAdd != 0 {
+        cc.wmu.Lock()
+        defer cc.wmu.Unlock()
+        if connAdd != 0 {
+            cc.fr.WriteWindowUpdate(0, mustUint31(connAdd))
+        }
+        if streamAdd != 0 {
+            cc.fr.WriteWindowUpdate(cs.ID, mustUint31(streamAdd))
+        }
+        cc.bw.Flush()
+    }
+
+    return
 }
 
 var errClosedResponseBody = errors.New("http2: response body closed")
