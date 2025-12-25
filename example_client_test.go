@@ -126,10 +126,10 @@ func TestWithCert(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	t2.Settings = []http2.Setting{
-		{ID: http2.SettingMaxConcurrentStreams, Val: 1000},
-		{ID: http2.SettingMaxFrameSize, Val: 16384},
-		{ID: http2.SettingMaxHeaderListSize, Val: 262144},
+	t2.Settings = map[http2.SettingID]uint32{
+		http2.SettingMaxConcurrentStreams: 1000,
+		http2.SettingMaxFrameSize:         16384,
+		http2.SettingMaxHeaderListSize:    262144,
 	}
 	t2.InitialWindowSize = 6291456
 	t2.HeaderTableSize = 65536
@@ -236,10 +236,10 @@ func TestFinishLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	t2.Settings = []http2.Setting{
-		{ID: http2.SettingMaxConcurrentStreams, Val: 1000},
-		{ID: http2.SettingMaxFrameSize, Val: 16384},
-		{ID: http2.SettingMaxHeaderListSize, Val: 262144},
+	t2.Settings = map[http2.SettingID]uint32{
+		http2.SettingMaxConcurrentStreams: 1000,
+		http2.SettingMaxFrameSize:         16384,
+		http2.SettingMaxHeaderListSize:    262144,
 	}
 	t2.InitialWindowSize = 6291456
 	t2.HeaderTableSize = 65536
