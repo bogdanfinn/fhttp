@@ -61,9 +61,9 @@ type Transport struct {
 
 	// AllowHTTP, if true, permits HTTP/2 requests using the insecure,
 	// plain-text "http" scheme. Note that this does not enable h2c support.
-	AllowHTTP bool
+	AllowHTTP       bool
 	InitialStreamID uint32
-	ConnectionFlow uint32
+	ConnectionFlow  uint32
 
 	// ConnPool optionally specifies an alternate connection pool to use.
 	// If nil, the default is used.
@@ -357,7 +357,9 @@ type ClientConn struct {
 	wantSettingsAck bool                 // we sent a SETTINGS frame and haven't heard back
 	werr            error                // first write error that has occurred
 
-	wmu sync.Mutex // held while writing; acquire AFTER mu if holding both
+	wmu        sync.Mutex // held while writing; acquire AFTER mu if holding both
+	connFlow   uint32
+	streamFlow uint32
 }
 
 // clientStream is the state for a single HTTP/2 stream. One of these
@@ -769,6 +771,23 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 		wantSettingsAck:       true,
 		pings:                 make(map[[8]byte]chan struct{}),
 	}
+
+	// ------------------------------------------------------------------
+	// FIX: Initialize dynamic flow control variables correctly
+	// ------------------------------------------------------------------
+
+	// 1. Determine Stream Flow (default to 4MB if not set in profile)
+	cc.streamFlow = transportDefaultStreamFlow
+	if v, ok := t.Settings[SettingInitialWindowSize]; ok && v != 0 {
+		cc.streamFlow = v
+	}
+
+	// 2. Determine Connection Flow (default to ~15MB if not set)
+	cc.connFlow = transportDefaultConnFlow
+	if t.ConnectionFlow != 0 {
+		cc.connFlow = t.ConnectionFlow
+	}
+
 	if d := t.idleConnTimeout(); d != 0 {
 		cc.idleTimeout = d
 		cc.idleTimer = time.AfterFunc(d, cc.onIdleTimeout)
@@ -804,11 +823,9 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 		cc.nextStreamID = 3
 	}
 
-	// [ADD THIS BLOCK]
 	if t.InitialStreamID != 0 {
 		cc.nextStreamID = t.InitialStreamID
 	}
-	// [END ADD BLOCK]
 
 	if cs, ok := c.(connectionStater); ok {
 		state := cs.ConnectionState()
@@ -822,44 +839,38 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 		pushEnabled = 1
 	}
 
-	//setMaxHeader := false
 	if t.Settings != nil {
-		// we need to iterate over the slice here not the map because of the random range over a map
 		for _, settingId := range t.SettingsOrder {
 			settingValue := t.Settings[settingId]
-
-			/*
-				if settingId == SettingMaxHeaderListSize && settingValue != 0 {
-					// setMaxHeader = true
-					if settingValue != 0 {
-						initialSettings = append(initialSettings, Setting{ID: SettingMaxHeaderListSize, Val: settingValue})
-						continue
-					}
-
-				}*/
-
 			initialSettings = append(initialSettings, Setting{ID: settingId, Val: settingValue})
 		}
 	} else {
-		// when we dont define a custom map on the transport we add Enable Push per default
 		initialSettings = append(initialSettings, Setting{ID: SettingEnablePush, Val: pushEnabled})
 	}
 
 	cc.bw.Write(clientPreface)
 	cc.fr.WriteSettings(initialSettings...)
 
-	cc.fr.WriteWindowUpdate(0, t.ConnectionFlow)
+	// ------------------------------------------------------------------
+	// CRITICAL FIX: Use the sanitized cc.connFlow.
+	// t.ConnectionFlow might be 0, which would send an illegal Window Update of 0.
+	// cc.connFlow is guaranteed to be non-zero (defaults to transportDefaultConnFlow).
+	// ------------------------------------------------------------------
+	if cc.connFlow > 0 {
+		cc.fr.WriteWindowUpdate(0, cc.connFlow)
+	}
 
 	for _, priority := range t.Priorities {
 		cc.fr.WritePriority(priority.StreamID, priority.PriorityParam)
 		cc.nextStreamID = priority.StreamID + 2
 	}
 
-	cc.inflow.add(transportDefaultConnFlow + initialWindowSize)
+	// Use the dynamic connection flow value we calculated earlier
+	cc.inflow.add(int32(cc.connFlow) + int32(initialWindowSize))
+
 	cc.bw.Flush()
 	if cc.werr != nil {
 		cc.Close()
-
 		return nil, cc.werr
 	}
 
@@ -1984,7 +1995,7 @@ func (cc *ClientConn) newStreamWithID(streamID uint32, incNext bool) *clientStre
 	}
 	cs.flow.add(int32(cc.initialWindowSize))
 	cs.flow.setConnFlow(&cc.flow)
-	cs.inflow.add(transportDefaultStreamFlow)
+	cs.inflow.add(int32(cc.streamFlow))
 	cs.inflow.setConnFlow(&cc.inflow)
 	cc.streams[cs.ID] = cs
 
@@ -2411,14 +2422,12 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 				cc.writeStreamReset(cs.ID, ErrCodeProtocol, err)
 			}
 			cs.readErr = err
-
 			return int(cs.bytesRemain), err
 		}
 		cs.bytesRemain -= int64(n)
 		if err == io.EOF && cs.bytesRemain > 0 {
 			err = io.ErrUnexpectedEOF
 			cs.readErr = err
-
 			return n, err
 		}
 	}
@@ -2428,60 +2437,63 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 	}
 
 	cc.mu.Lock()
-    defer cc.mu.Unlock()
+	defer cc.mu.Unlock()
 
-    var connAdd, streamAdd int32
-    // Check the conn-level first, before the stream-level.
-    if v := cc.inflow.available(); v < transportDefaultConnFlow/2 {
-        connAdd = transportDefaultConnFlow - v
-        cc.inflow.add(connAdd)
-    }
-    if err == nil { // No need to refresh if the stream is over or failed.
-        // Consider any buffered body data (read from the conn but not
-        // consumed by the client) when computing flow control for this
-        // stream.
-        unsent := transportDefaultStreamFlow - int(cs.inflow.available()) + cs.bufPipe.Len()
-        
-        // [MODIFIED LOGIC START]
-        // We lower the threshold for sending updates.
-        // Original logic: update if unsent > 4KB AND unsent > 2MB (transportDefaultStreamFlow/2)
-        // New logic: update if unsent > 16KB (or whatever minimum you want to be safe).
-        // This ensures we send updates much frequently even if the total window is small.
-        
-        const aggressiveThreshold = 16384 // 16KB
+	var connAdd, streamAdd int32
 
-        // If the user provided a small InitialWindowSize (like Firefox's 128KB), 
-        // the standard logic (waiting for 2MB consumption) will NEVER trigger, causing the stall.
-        // We check if the configured initial window is small.
-        isSmallWindow := cc.initialWindowSize < 1048576 // < 1MB
+	// Check the conn-level first, before the stream-level.
+	// Use dynamic connFlow logic
+	if v := cc.inflow.available(); v < int32(cc.connFlow/2) {
+		connAdd = int32(cc.connFlow) - v
+		cc.inflow.add(connAdd)
+	}
 
-        if isSmallWindow {
-            if unsent > aggressiveThreshold {
-                streamAdd = int32(unsent)
-                cs.inflow.add(streamAdd)
-            }
-        } else {
-             // Fallback to standard behavior for large windows (Chrome)
-             if unsent > transportDefaultStreamMinRefresh && unsent > transportDefaultStreamFlow/2 {
-                streamAdd = int32(unsent)
-                cs.inflow.add(streamAdd)
-            }
-        }
-        // [MODIFIED LOGIC END]
-    }
-    if connAdd != 0 || streamAdd != 0 {
-        cc.wmu.Lock()
-        defer cc.wmu.Unlock()
-        if connAdd != 0 {
-            cc.fr.WriteWindowUpdate(0, mustUint31(connAdd))
-        }
-        if streamAdd != 0 {
-            cc.fr.WriteWindowUpdate(cs.ID, mustUint31(streamAdd))
-        }
-        cc.bw.Flush()
-    }
+	if err == nil {
+		// Consider any buffered body data (read from the conn but not
+		// consumed by the client) when computing flow control for this
+		// stream.
 
-    return
+		// Use dynamic streamFlow logic
+		unsent := int(cc.streamFlow) - int(cs.inflow.available()) + cs.bufPipe.Len()
+
+		// ------------------------------------------------------------------
+		// FIX: Adaptive Logic
+		// ------------------------------------------------------------------
+		const aggressiveThreshold = 16384 // 16KB
+
+		// Check if the configured initial window is small (e.g. Firefox's 128KB or 65KB).
+		// If so, we need to be aggressive with updates.
+		isSmallWindow := cc.initialWindowSize < 1048576 // < 1MB
+
+		if isSmallWindow {
+			if unsent > aggressiveThreshold {
+				streamAdd = int32(unsent)
+				cs.inflow.add(streamAdd)
+			}
+		} else {
+			// Fallback to standard behavior for large windows (Chrome/Default).
+			// FIX: Replaced transportDefaultStreamFlow constant with cc.streamFlow.
+			// This ensures correct behavior if a user sets a custom Large window (e.g. 6MB).
+			if unsent > transportDefaultStreamMinRefresh && unsent > int(cc.streamFlow)/2 {
+				streamAdd = int32(unsent)
+				cs.inflow.add(streamAdd)
+			}
+		}
+	}
+
+	if connAdd != 0 || streamAdd != 0 {
+		cc.wmu.Lock()
+		defer cc.wmu.Unlock()
+		if connAdd != 0 {
+			cc.fr.WriteWindowUpdate(0, mustUint31(connAdd))
+		}
+		if streamAdd != 0 {
+			cc.fr.WriteWindowUpdate(cs.ID, mustUint31(streamAdd))
+		}
+		cc.bw.Flush()
+	}
+
+	return
 }
 
 var errClosedResponseBody = errors.New("http2: response body closed")
