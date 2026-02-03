@@ -2568,8 +2568,7 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 	}
 
 	// Set gzip to true if the caller's Accept-Encoding includes gzip.
-	if !pc.t.DisableCompression &&
-		strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+	if !pc.t.DisableCompression && (strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") || strings.Contains(req.Request.Header.get("accept-encoding"), "gzip")) {
 		requestedGzip = true
 	}
 
