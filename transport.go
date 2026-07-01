@@ -12,8 +12,8 @@ package http
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
+	"github.com/klauspost/compress/flate"
+	"github.com/klauspost/compress/gzip"
 	"compress/zlib"
 	"container/list"
 	"context"
