@@ -175,21 +175,23 @@ type HeaderKeyValues struct {
 // It's used as a pointer, so it can fit in a sort.Interface
 // interface value without allocation.
 type headerSorter struct {
-	kvs   []HeaderKeyValues
-	order map[string]int
+	kvs       []HeaderKeyValues
+	order     map[string]int
+	lowerKeys []string
 }
 
-func (s *headerSorter) Len() int      { return len(s.kvs) }
-func (s *headerSorter) Swap(i, j int) { s.kvs[i], s.kvs[j] = s.kvs[j], s.kvs[i] }
+func (s *headerSorter) Len() int { return len(s.kvs) }
+func (s *headerSorter) Swap(i, j int) {
+	s.kvs[i], s.kvs[j] = s.kvs[j], s.kvs[i]
+	s.lowerKeys[i], s.lowerKeys[j] = s.lowerKeys[j], s.lowerKeys[i]
+}
 func (s *headerSorter) Less(i, j int) bool {
 	// If the order isn't defined, sort lexicographically.
 	if s.order == nil {
 		return s.kvs[i].Key < s.kvs[j].Key
 	}
-	//idxi, iok := s.order[s.kvs[i].Key]
-	//idxj, jok := s.order[s.kvs[j].Key]
-	idxi, iok := s.order[strings.ToLower(s.kvs[i].Key)]
-	idxj, jok := s.order[strings.ToLower(s.kvs[j].Key)]
+	idxi, iok := s.order[s.lowerKeys[i]]
+	idxj, jok := s.order[s.lowerKeys[j]]
 	if !iok && !jok {
 		return s.kvs[i].Key < s.kvs[j].Key
 	} else if !iok && jok {
@@ -242,6 +244,15 @@ func (h Header) SortedKeyValuesBy(order map[string]int, exclude map[string]bool)
 	}
 	hs.kvs = kvs
 	hs.order = order
+
+	if cap(hs.lowerKeys) < len(kvs) {
+		hs.lowerKeys = make([]string, len(kvs))
+	}
+	hs.lowerKeys = hs.lowerKeys[:len(kvs)]
+	for i, kv := range kvs {
+		hs.lowerKeys[i] = strings.ToLower(kv.Key)
+	}
+
 	sort.Sort(hs)
 
 	return kvs, hs

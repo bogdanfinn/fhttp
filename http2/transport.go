@@ -1914,7 +1914,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 			return
 		}
 
-		name = strings.ToLower(name)
+		name = lowerHeader(name)
 		cc.writeHeader(name, value)
 		if traceHeaders {
 			traceWroteHeaderField(trace, name, value)
@@ -1964,7 +1964,7 @@ func (cc *ClientConn) encodeTrailers(req *http.Request) ([]byte, error) {
 	for k, vv := range req.Trailer {
 		// Transfer-Encoding, etc.. have already been filtered at the
 		// start of RoundTrip
-		lowKey := strings.ToLower(k)
+		lowKey := lowerHeader(k)
 		for _, v := range vv {
 			cc.writeHeader(lowKey, v)
 		}
