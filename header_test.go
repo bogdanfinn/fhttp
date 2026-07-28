@@ -443,3 +443,28 @@ func BenchmarkHeaderWriteSubsetParallel(b *testing.B) {
 		}
 	})
 }
+
+func TestHeaderSorterPoolReuse(t *testing.T) {
+	// A sorter used by SortedKeyValuesBy keeps its order map. When it is
+	// pulled from the pool again by SortedKeyValues (no order), the stale
+	// order must not be used.
+	ordered := Header{
+		"Zebra": {"1"},
+		"Apple": {"2"},
+	}
+	// Deliberately the reverse of lexicographic order.
+	_, hs := ordered.SortedKeyValuesBy(map[string]int{"zebra": 0, "apple": 1}, nil)
+	headerSorterPool.Put(hs)
+
+	plain := Header{
+		"Apple":  {"1"},
+		"Banana": {"2"},
+		"Zebra":  {"3"},
+	}
+	kvs, _ := plain.SortedKeyValues(nil)
+	for i := 1; i < len(kvs); i++ {
+		if kvs[i-1].Key > kvs[i].Key {
+			t.Fatalf("keys not sorted lexicographically: %q before %q", kvs[i-1].Key, kvs[i].Key)
+		}
+	}
+}
