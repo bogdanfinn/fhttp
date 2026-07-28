@@ -6,6 +6,7 @@ package http
 
 import (
 	"bytes"
+	"io"
 	"reflect"
 	"runtime"
 	"testing"
@@ -357,5 +358,53 @@ func TestHTTP1HeaderOrder(t *testing.T) {
 	expected := "GET /stores/size/products/16069871?channel=android-app-phone&expand=variations,informationBlocks,customisations HTTP/1.1\r\nX-NewRelic-ID: 12345\r\nx-api-key: ABCDE12345\r\nMESH-Commerce-Channel: android-app-phone\r\nmesh-version: cart=4\r\nUser-Agent: size/3.1.0.8355 (android-app-phone; Android 10; Build/CPH2185_11_A.28)\r\nX-Request-Auth: hawkHeader\r\nX-acf-sensor-data: 3456\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json; charset=UTF-8\r\nAccept: application/json\r\nHost: prod.jdgroupmesh.cloud\r\nConnection: Keep-Alive\r\nAccept-Encoding: gzip\r\n\r\n"
 	if expected != buf.String() {
 		t.Fatalf("got:\n%swant:\n%s", buf.String(), expected)
+	}
+}
+
+func TestHeaderWriteWithoutOrder(t *testing.T) {
+	// Sorting without a HeaderOrderKey goes through SortedKeyValues,
+	// which does not populate headerSorter.lowerKeys. Swap must not
+	// touch lowerKeys in that case.
+	h := Header{
+		"Zebra":   {"1"},
+		"Apple":   {"2"},
+		"Mango":   {"3"},
+		"Banana":  {"4"},
+		"Orange":  {"5"},
+		"Kiwi":    {"6"},
+		"Grape":   {"7"},
+		"Lemon":   {"8"},
+		"Peach":   {"9"},
+		"Cherry":  {"10"},
+		"Plum":    {"11"},
+		"Apricot": {"12"},
+	}
+	if err := h.Write(io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHeaderSorterPoolReuse(t *testing.T) {
+	// A sorter used by SortedKeyValuesBy carries order and lowerKeys.
+	// When it is pulled from the pool again by SortedKeyValues (no
+	// order), the stale state must not be used.
+	ordered := Header{
+		"Zebra": {"1"},
+		"Apple": {"2"},
+	}
+	// Deliberately the reverse of lexicographic order.
+	_, hs := ordered.SortedKeyValuesBy(map[string]int{"zebra": 0, "apple": 1}, nil)
+	headerSorterPool.Put(hs)
+
+	plain := Header{
+		"Apple":  {"1"},
+		"Banana": {"2"},
+		"Zebra":  {"3"},
+	}
+	kvs, _ := plain.SortedKeyValues(nil)
+	for i := 1; i < len(kvs); i++ {
+		if kvs[i-1].Key > kvs[i].Key {
+			t.Fatalf("keys not sorted lexicographically: %q before %q", kvs[i-1].Key, kvs[i].Key)
+		}
 	}
 }

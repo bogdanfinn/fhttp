@@ -183,7 +183,11 @@ type headerSorter struct {
 func (s *headerSorter) Len() int { return len(s.kvs) }
 func (s *headerSorter) Swap(i, j int) {
 	s.kvs[i], s.kvs[j] = s.kvs[j], s.kvs[i]
-	s.lowerKeys[i], s.lowerKeys[j] = s.lowerKeys[j], s.lowerKeys[i]
+	// lowerKeys is only populated by SortedKeyValuesBy; SortedKeyValues
+	// sorts without it.
+	if s.lowerKeys != nil {
+		s.lowerKeys[i], s.lowerKeys[j] = s.lowerKeys[j], s.lowerKeys[i]
+	}
 }
 func (s *headerSorter) Less(i, j int) bool {
 	// If the order isn't defined, sort lexicographically.
@@ -225,6 +229,11 @@ func (h Header) SortedKeyValues(exclude map[string]bool) (kvs []HeaderKeyValues,
 		mutex.RUnlock()
 	}
 	hs.kvs = kvs
+	// Reset state a pooled sorter may carry from a previous
+	// SortedKeyValuesBy call: a stale order would make Less sort by the
+	// wrong order (and index lowerKeys, which this path leaves empty).
+	hs.order = nil
+	hs.lowerKeys = nil
 	sort.Sort(hs)
 	return kvs, hs
 }
