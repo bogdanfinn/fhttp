@@ -2901,6 +2901,25 @@ func DecompressBodyByType(body io.ReadCloser, contentType string) io.ReadCloser 
 	}
 }
 
+// gzipReaderPool recycles gzip.Readers between responses. Each gzip.Reader
+// owns a 32KB decompression window plus Huffman decoding tables, and
+// allocating them per response dominates the allocation profile of a client
+// that reads many compressed bodies. gzip.Reader.Reset reuses that state, so
+// a body only allocates when the pool is empty.
+//
+// Readers are recycled when a body has been read to EOF, never when it is
+// closed: the body types under gzipReader support Close being called
+// concurrently with a Read in order to unblock it, so recycling on Close
+// could hand a reader that is still in use to an unrelated response. A body
+// that is abandoned before EOF simply is not recycled. A pooled reader keeps
+// a reference to the body it last read until it is reused, but sync.Pool
+// drops its contents on every GC, so that reference cannot outlive a GC
+// cycle.
+//
+// Read itself, like that of any io.Reader, must not be called concurrently
+// on the same body.
+var gzipReaderPool sync.Pool
+
 // gzipReader wraps a response body so it can lazily
 // call gzip.NewReader on the first call to Read
 type gzipReader struct {
@@ -2915,13 +2934,41 @@ func (gz *gzipReader) Read(p []byte) (n int, err error) {
 		return 0, gz.zerr
 	}
 	if gz.zr == nil {
-		gz.zr, err = gzip.NewReader(gz.body)
+		if zr, ok := gzipReaderPool.Get().(*gzip.Reader); ok {
+			if err = zr.Reset(gz.body); err != nil {
+				// A failed Reset leaves the reader reusable, since the next
+				// Reset reassigns all of its state. Return it to the pool
+				// rather than dropping it, so that bodies which cannot be
+				// read - an empty body reads as an unexpected EOF - do not
+				// drain the pool one reader at a time.
+				gzipReaderPool.Put(zr)
+			} else {
+				gz.zr = zr
+			}
+		} else {
+			// NewReader returns a nil reader when the header cannot be read,
+			// so there is nothing to pool on this path.
+			gz.zr, err = gzip.NewReader(gz.body)
+		}
 		if err != nil {
+			gz.zr = nil
 			gz.zerr = err
 			return 0, err
 		}
 	}
-	return gz.zr.Read(p)
+	n, err = gz.zr.Read(p)
+	if err == io.EOF {
+		// The body is fully decompressed, including any concatenated
+		// streams, and the reader is done with it, so this is the one point
+		// where recycling cannot collide with a read in progress. Later
+		// Reads keep returning io.EOF, as they did when the reader was
+		// retained. Detach the reader before publishing it to the pool.
+		zr := gz.zr
+		gz.zr = nil
+		gz.zerr = io.EOF
+		gzipReaderPool.Put(zr)
+	}
+	return n, err
 }
 
 func (gz *gzipReader) Close() error {
