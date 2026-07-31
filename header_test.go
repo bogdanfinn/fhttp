@@ -6,8 +6,10 @@ package http
 
 import (
 	"bytes"
+	"io"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -358,4 +360,86 @@ func TestHTTP1HeaderOrder(t *testing.T) {
 	if expected != buf.String() {
 		t.Fatalf("got:\n%swant:\n%s", buf.String(), expected)
 	}
+}
+
+func TestWriteSubsetDoesNotMutateExclude(t *testing.T) {
+	h := Header{
+		"Keep-One":      {"1"},
+		"Drop-Me":       {"nope"},
+		"Keep-Two":      {"2"},
+		HeaderOrderKey:  {"keep-two", "keep-one"},
+		PHeaderOrderKey: {":method"},
+	}
+	exclude := map[string]bool{"Drop-Me": true}
+
+	var buf bytes.Buffer
+	if err := h.WriteSubset(&buf, exclude); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := map[string]bool{"Drop-Me": true}; !reflect.DeepEqual(exclude, want) {
+		t.Errorf("WriteSubset mutated the caller's exclude map: got %v, want %v", exclude, want)
+	}
+	got := buf.String()
+	if want := "Keep-Two: 2\r\nKeep-One: 1\r\n"; got != want {
+		t.Errorf("WriteSubset output = %q, want %q", got, want)
+	}
+}
+
+func TestWriteSubsetSharedExcludeConcurrent(t *testing.T) {
+	// Callers such as Response.Write pass a shared package-level exclude
+	// map. Concurrent writes with and without a Header-Order: key must
+	// not race on it (this test is only meaningful under -race).
+	shared := map[string]bool{"Content-Length": true}
+	ordered := Header{
+		"B-Second":     {"2"},
+		"A-First":      {"1"},
+		HeaderOrderKey: {"a-first", "b-second"},
+	}
+	plain := Header{
+		"Zulu":  {"1"},
+		"Alpha": {"2"},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		h := ordered
+		if i%2 == 1 {
+			h = plain
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 100; n++ {
+				if err := h.WriteSubset(io.Discard, shared); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkHeaderWriteSubsetParallel(b *testing.B) {
+	b.ReportAllocs()
+	h := Header{
+		"sec-ch-ua":       {"\"Chromium\";v=\"124\""},
+		"accept":          {"*/*"},
+		"user-agent":      {"Mozilla/5.0"},
+		"content-type":    {"application/json"},
+		"accept-language": {"en-US,en;q=0.9"},
+		"accept-encoding": {"gzip, deflate, br"},
+		"referer":         {"https://example.org/x"},
+		HeaderOrderKey: {
+			"sec-ch-ua", "accept", "user-agent", "content-type",
+			"referer", "accept-encoding", "accept-language",
+		},
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if err := h.WriteSubset(io.Discard, nil); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
