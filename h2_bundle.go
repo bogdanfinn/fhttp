@@ -8643,6 +8643,32 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 		}
 	}
 
+	// Clone, augment and sort the headers once up front: enumerateHeaders
+	// below is called twice (once to count the header list size, once to
+	// write), and this work is identical between the two passes. Cloning
+	// also keeps the added content-length and accept-encoding headers off
+	// the caller's req.Header.
+	hdrs := req.Header.Clone()
+	if _, ok := req.Header["content-length"]; !ok && http2shouldSendReqContentLength(req.Method, contentLength) {
+		hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
+	}
+
+	// Does not include accept-encoding header if its defined in req.Header
+	if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
+		hdrs["accept-encoding"] = []string{"gzip, deflate, br"}
+	}
+
+	var kvs []HeaderKeyValues
+	if headerOrder, ok := hdrs[HeaderOrderKey]; ok {
+		order := make(map[string]int, len(headerOrder))
+		for i, v := range headerOrder {
+			order[v] = i
+		}
+		kvs, _ = hdrs.SortedKeyValuesBy(order, nil)
+	} else {
+		kvs, _ = hdrs.SortedKeyValues(nil)
+	}
+
 	enumerateHeaders := func(f func(name, value string)) {
 		// 8.1.2.3 Request Pseudo-Header Fields
 		// The :path pseudo-header field includes the path and query parts of the
@@ -8696,32 +8722,8 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 			f("trailer", trailers)
 		}
 
-		// Should clone, because this function is called twice; to read and to write.
-		// If headers are added to the req, then headers would be added twice.
-		hdrs := req.Header.Clone()
-		if _, ok := req.Header["content-length"]; !ok && http2shouldSendReqContentLength(req.Method, contentLength) {
-			hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
-		}
-
-		// Does not include accept-encoding header if its defined in req.Header
-		if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
-			hdrs["accept-encoding"] = []string{"gzip, deflate, br"}
-		}
-
 		// Formats and writes headers with f function
 		var didUA bool
-		var kvs []HeaderKeyValues
-
-		if headerOrder, ok := hdrs[HeaderOrderKey]; ok {
-			order := make(map[string]int)
-			for i, v := range headerOrder {
-				order[v] = i
-			}
-			kvs, _ = hdrs.SortedKeyValuesBy(order, make(map[string]bool))
-		} else {
-			kvs, _ = hdrs.SortedKeyValues(make(map[string]bool))
-		}
-
 		for _, kv := range kvs {
 			if strings.EqualFold(kv.Key, "host") {
 				// Host is :authority, already sent.
