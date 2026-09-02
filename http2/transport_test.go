@@ -3214,7 +3214,9 @@ func TestTransportRequestPathPseudo(t *testing.T) {
 		},
 	}
 	for i, tt := range tests {
-		cc := &ClientConn{peerMaxHeaderListSize: 0xffffffffffffffff}
+		// encodeHeaders consults cc.t (for PseudoHeaderOrder), so the
+		// ClientConn needs a Transport.
+		cc := &ClientConn{t: &Transport{}, peerMaxHeaderListSize: 0xffffffffffffffff}
 		cc.henc = hpack.NewEncoder(&cc.hbuf)
 		cc.mu.Lock()
 		hdrs, err := cc.encodeHeaders(tt.req, false, "", -1)
@@ -4741,14 +4743,14 @@ func TestClientConnEncodeHeadersOrder(t *testing.T) {
 		want          []string
 	}{
 		{
-			// Neither ordering key, and no order on the Transport either.
-			// No pseudo-headers are emitted at all; that is pre-existing
-			// behavior on this path, unchanged by header preparation.
+			// Neither ordering key, and no order on the Transport either,
+			// so encodeHeaders falls back to the RFC 7540 8.1.2.3 order.
 			name:          "no order keys and no transport order",
 			header:        http.Header{"B-Two": {"2"}, "A-One": {"1"}},
 			addGzipHeader: true,
 			contentLength: -1,
 			want: []string{
+				":authority: www.example.org", ":method: GET", ":path: /p", ":scheme: https",
 				"a-one: 1", "b-two: 2",
 				"accept-encoding: gzip, deflate, br",
 				"user-agent: " + defaultUserAgent,

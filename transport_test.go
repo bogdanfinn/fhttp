@@ -955,13 +955,19 @@ var roundTripTests = []struct {
 	accept       string
 	expectAccept string
 	compressed   bool
+	// expectCE is the Content-Encoding left on the response. It is empty
+	// whenever the Transport decoded the body itself, since decoding
+	// removes the header.
+	expectCE string
 }{
 	// Requests with no accept-encoding header use transparent compression
-	{"", "gzip", false},
+	{"", transportAcceptEncoding, false, ""},
 	// Requests with other accept-encoding should pass through unmodified
-	{"foo", "foo", false},
-	// Requests with accept-encoding == gzip should be passed through
-	{"gzip", "gzip", true},
+	{"foo", "foo", false, "foo"},
+	// Requests with accept-encoding == gzip are decompressed by the
+	// Transport too: unlike net/http, fhttp also auto-decodes when the
+	// caller asked for gzip itself (see requestedGzip in transport.go).
+	{"gzip", "gzip", false, ""},
 }
 
 // Test that the modification made to the Request by the RoundTripper is cleaned up
@@ -975,7 +981,7 @@ func TestRoundTripGzip(t *testing.T) {
 			t.Errorf("in handler, test %v: Accept-Encoding = %q, want %q",
 				req.FormValue("testnum"), accept, expect)
 		}
-		if accept == "gzip" {
+		if strings.Contains(accept, "gzip") {
 			rw.Header().Set("Content-Encoding", "gzip")
 			gz := gzip.NewWriter(rw)
 			gz.Write([]byte(responseBody))
@@ -990,7 +996,7 @@ func TestRoundTripGzip(t *testing.T) {
 
 	for i, test := range roundTripTests {
 		// Test basic request (no accept-encoding)
-		req, _ := NewRequest("GET", fmt.Sprintf("%s/?testnum=%d&expect_accept=%s", ts.URL, i, test.expectAccept), nil)
+		req, _ := NewRequest("GET", fmt.Sprintf("%s/?testnum=%d&expect_accept=%s", ts.URL, i, url.QueryEscape(test.expectAccept)), nil)
 		if test.accept != "" {
 			req.Header.Set("Accept-Encoding", test.accept)
 		}
@@ -1022,7 +1028,7 @@ func TestRoundTripGzip(t *testing.T) {
 		if g, e := req.Header.Get("Accept-Encoding"), test.accept; g != e {
 			t.Errorf("%d. Accept-Encoding = %q; want %q (it was mutated, in violation of RoundTrip contract)", i, g, e)
 		}
-		if g, e := res.Header.Get("Content-Encoding"), test.accept; g != e {
+		if g, e := res.Header.Get("Content-Encoding"), test.expectCE; g != e {
 			t.Errorf("%d. Content-Encoding = %q; want %q", i, g, e)
 		}
 	}
@@ -1041,7 +1047,7 @@ func TestTransportGzip(t *testing.T) {
 			}
 			return
 		}
-		if g, e := req.Header.Get("Accept-Encoding"), "gzip"; g != e {
+		if g, e := req.Header.Get("Accept-Encoding"), transportAcceptEncoding; g != e {
 			t.Errorf("Accept-Encoding = %q, want %q", g, e)
 		}
 		rw.Header().Set("Content-Encoding", "gzip")
@@ -3460,7 +3466,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("GET", "http://fake.golang", nil)
 			},
-			reqString: `GET / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip\r\n\r\n`,
+			reqString: `GET / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\n`,
 		},
 		{
 			name: "IdempotentGetBodySomeWritten",
@@ -3472,7 +3478,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("GET", "http://fake.golang", strings.NewReader("foo\n"))
 			},
-			reqString: `GET / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nContent-Length: 4\r\nAccept-Encoding: gzip\r\n\r\nfoo\n`,
+			reqString: `GET / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\nfoo\n`,
 		},
 		{
 			name: "NothingWrittenNoBody",
@@ -3483,7 +3489,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("DELETE", "http://fake.golang", nil)
 			},
-			reqString: `DELETE / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip\r\n\r\n`,
+			reqString: `DELETE / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\n`,
 		},
 		{
 			name: "NothingWrittenGetBody",
@@ -3496,7 +3502,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("POST", "http://fake.golang", strings.NewReader("foo\n"))
 			},
-			reqString: `POST / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nContent-Length: 4\r\nAccept-Encoding: gzip\r\n\r\nfoo\n`,
+			reqString: `POST / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\nfoo\n`,
 		},
 	}
 
@@ -4097,7 +4103,10 @@ func TestTransportFlushesBodyChunks(t *testing.T) {
 	defer res.Body.Close()
 
 	want := []string{
-		"POST / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: x\r\nTransfer-Encoding: chunked\r\nAccept-Encoding: gzip\r\n\r\n",
+		// fhttp writes the request header map in sorted order and adds its
+		// own Accept-Encoding last, via extraHeaders.
+		"POST / HTTP/1.1\r\nHost: localhost:8080\r\nTransfer-Encoding: chunked\r\nUser-Agent: x\r\n" +
+			"Accept-Encoding: " + transportAcceptEncoding + "\r\n\r\n",
 		"5\r\nnum0\n\r\n",
 		"5\r\nnum1\n\r\n",
 		"5\r\nnum2\n\r\n",
@@ -4459,6 +4468,7 @@ func TestTransportEventTrace_NoHooks(t *testing.T)    { testTransportEventTrace(
 func TestTransportEventTrace_NoHooks_h2(t *testing.T) { testTransportEventTrace(t, h2Mode, true) }
 
 func testTransportEventTrace(t *testing.T, h2 bool, noHooks bool) {
+	skipNeedsStdNettrace(t)
 	defer afterTest(t)
 	const resBody = "some body"
 	gotWroteReqEvent := make(chan struct{}, 500)
@@ -4696,7 +4706,9 @@ func TestTransportEventTraceTLSVerify(t *testing.T) {
 
 	wantOnce("TLSHandshakeStart")
 	wantOnce("TLSHandshakeDone")
-	wantOnce("err = x509: certificate is valid for example.com")
+	// Go 1.20 wraps the verification error, so the x509 message is no
+	// longer at the start of the error string.
+	wantOnce("err = tls: failed to verify certificate: x509: certificate is valid for example.com")
 
 	if t.Failed() {
 		t.Errorf("Output:\n%s", got)
@@ -4722,6 +4734,7 @@ func skipIfDNSHijacked(t *testing.T) {
 }
 
 func TestTransportEventTraceRealDNS(t *testing.T) {
+	skipNeedsStdNettrace(t)
 	skipIfDNSHijacked(t)
 	defer afterTest(t)
 	tr := &Transport{}
@@ -4837,6 +4850,7 @@ func TestTLSHandshakeTrace(t *testing.T) {
 }
 
 func TestTransportMaxIdleConns(t *testing.T) {
+	skipNeedsStdNettrace(t)
 	defer afterTest(t)
 	ts := httptest.NewServer(HandlerFunc(func(w ResponseWriter, r *Request) {
 		// No body for convenience.
@@ -5062,6 +5076,7 @@ func TestTransportReturnsPeekError(t *testing.T) {
 func TestTransportIDNA_h1(t *testing.T) { testTransportIDNA(t, h1Mode) }
 func TestTransportIDNA_h2(t *testing.T) { testTransportIDNA(t, h2Mode) }
 func testTransportIDNA(t *testing.T, h2 bool) {
+	skipNeedsStdNettrace(t)
 	defer afterTest(t)
 
 	const uniDomain = "гофер.го"

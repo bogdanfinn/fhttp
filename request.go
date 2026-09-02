@@ -615,6 +615,13 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 		return err
 	}
 
+	// Host and User-Agent are written through the header map (so that they
+	// participate in the configured header order), which means the map has
+	// to exist: a zero-value Request has a nil Header.
+	if r.Header == nil {
+		r.Header = make(Header)
+	}
+
 	if _, ok := r.Header["Host"]; !ok {
 		if _, ok := r.Header["host"]; !ok {
 			r.Header.Set("Host", host)

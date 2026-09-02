@@ -776,8 +776,13 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 	// FIX: Initialize dynamic flow control variables correctly
 	// ------------------------------------------------------------------
 
-	// 1. Determine Stream Flow (default to 4MB if not set in profile)
-	cc.streamFlow = transportDefaultStreamFlow
+	// 1. Determine Stream Flow. This has to match the window the peer will
+	// actually use: we only ever tell it about our window via
+	// SETTINGS_INITIAL_WINDOW_SIZE, so when the profile does not set that
+	// setting the peer stays on the RFC 7540 default and we must too.
+	// Claiming a larger window than we advertised makes the refresh
+	// threshold below unreachable and stalls the stream forever.
+	cc.streamFlow = initialWindowSize
 	if v, ok := t.Settings[SettingInitialWindowSize]; ok && v != 0 {
 		cc.streamFlow = v
 	}
@@ -1761,7 +1766,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 
 		if !ok {
 			pHeaderOrder = cc.t.PseudoHeaderOrder
-			ok = true
+			ok = len(pHeaderOrder) > 0
 		}
 
 		m := req.Method
@@ -1775,7 +1780,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 				case ":authority":
 					f(":authority", host)
 				case ":method":
-					f(":method", req.Method)
+					f(":method", m)
 				case ":path":
 					if req.Method != "CONNECT" {
 						f(":path", path)
@@ -1806,6 +1811,9 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 		// Should clone, because this function is called twice; to read and to write.
 		// If headers are added to the req, then headers would be added twice.
 		hdrs := req.Header.Clone()
+		if hdrs == nil {
+			hdrs = make(http.Header)
+		}
 		if _, ok := req.Header["content-length"]; !ok && shouldSendReqContentLength(req.Method, contentLength) {
 			hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
 		}
@@ -1881,7 +1889,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 					kv.Values = kv.Values[:1]
 				}
 
-				if kv.Values[0] == "" {
+				if len(kv.Values) == 0 || kv.Values[0] == "" {
 					continue
 				}
 			}

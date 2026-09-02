@@ -20,6 +20,23 @@ import (
 
 var quietLog = log.New(io.Discard, "", 0)
 
+// transportAcceptEncoding is the Accept-Encoding value this fork's Transport
+// adds on its own behalf. Upstream net/http sends just "gzip"; fhttp also
+// advertises deflate and brotli, so tests inherited from net/http have to
+// expect this value wherever the Transport supplied the header itself.
+const transportAcceptEncoding = "gzip, deflate, br"
+
+// skipNeedsStdNettrace skips tests that install net's alternate resolver, or
+// that expect DNS trace hooks to fire, via internal/nettrace context keys.
+// The net package matches those keys by type against the standard library's
+// own internal/nettrace; this module vendors its own copy, so the keys never
+// match, the fake resolver is ignored and the lookup hits real DNS. That is
+// not fixable outside the standard library.
+func skipNeedsStdNettrace(t *testing.T) {
+	t.Helper()
+	t.Skip("needs the standard library's internal/nettrace hooks; a fork cannot install them")
+}
+
 func TestMain(m *testing.M) {
 	v := m.Run()
 	if v == 0 && goroutineLeaked() {

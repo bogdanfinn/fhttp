@@ -188,7 +188,8 @@ func TestClient_Load(t *testing.T) {
 
 	pool, err := getCharlesCert()
 	if err != nil {
-		t.Fatal(err)
+		// Requires a local Charles proxy and its CA cert in $HOME.
+		t.Skipf("Charles proxy not configured locally: %v", err)
 	}
 	c := http.Client{
 		Transport: &http.Transport{
@@ -220,7 +221,8 @@ func TestGClient_Load(t *testing.T) {
 
 	pool, err := getCharlesCert()
 	if err != nil {
-		t.Fatal(err)
+		// Requires a local Charles proxy and its CA cert in $HOME.
+		t.Skipf("Charles proxy not configured locally: %v", err)
 	}
 	c := ghttp.Client{
 		Transport: &ghttp.Transport{

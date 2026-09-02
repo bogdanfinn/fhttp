@@ -8649,6 +8649,9 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 	// also keeps the added content-length and accept-encoding headers off
 	// the caller's req.Header.
 	hdrs := req.Header.Clone()
+	if hdrs == nil {
+		hdrs = make(Header)
+	}
 	if _, ok := req.Header["content-length"]; !ok && http2shouldSendReqContentLength(req.Method, contentLength) {
 		hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
 	}
@@ -8680,7 +8683,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 
 		if !ok {
 			pHeaderOrder = cc.t.t1.PseudoHeaderOrder
-			ok = true
+			ok = len(pHeaderOrder) > 0
 		}
 
 		m := req.Method
@@ -8694,7 +8697,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 				case ":authority":
 					f(":authority", host)
 				case ":method":
-					f(":method", req.Method)
+					f(":method", m)
 				case ":path":
 					if req.Method != "CONNECT" {
 						f(":path", path)
@@ -8770,7 +8773,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 					kv.Values = kv.Values[:1]
 				}
 
-				if kv.Values[0] == "" {
+				if len(kv.Values) == 0 || kv.Values[0] == "" {
 					continue
 				}
 			}

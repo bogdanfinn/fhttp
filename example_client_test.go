@@ -215,19 +215,21 @@ func TestEnablePush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 
 	req, err = http.NewRequest("POST", "https://httpbin.org/post", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Do(req)
+	resp, err = c.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp.Body.Close()
 }
 
 // Test finishline
@@ -322,6 +324,7 @@ func TestCompressionBrotli(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resp.Body.Close()
 
 	if h := resp.Header.Get("content-encoding"); h == "" || h != "br" {
 		t.Fatalf("Got content-encoding header %v, expected br", h)
