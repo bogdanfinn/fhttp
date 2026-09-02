@@ -6,6 +6,7 @@ package http
 
 import (
 	"io"
+	"maps"
 	"net/textproto"
 	"sort"
 	"strings"
@@ -204,8 +205,6 @@ var headerSorterPool = sync.Pool{
 	New: func() interface{} { return new(headerSorter) },
 }
 
-var mutex = &sync.RWMutex{}
-
 // SortedKeyValues returns h's keys sorted in the returned kvs
 // slice. The headerSorter used to sort is also returned, for possible
 // return to headerSorterCache.
@@ -216,11 +215,9 @@ func (h Header) SortedKeyValues(exclude map[string]bool) (kvs []HeaderKeyValues,
 	}
 	kvs = hs.kvs[:0]
 	for k, vv := range h {
-		mutex.RLock()
 		if !exclude[k] {
 			kvs = append(kvs, HeaderKeyValues{k, vv})
 		}
-		mutex.RUnlock()
 	}
 	hs.kvs = kvs
 	sort.Sort(hs)
@@ -234,11 +231,9 @@ func (h Header) SortedKeyValuesBy(order map[string]int, exclude map[string]bool)
 	}
 	kvs = hs.kvs[:0]
 	for k, vv := range h {
-		mutex.RLock()
 		if !exclude[k] {
 			kvs = append(kvs, HeaderKeyValues{k, vv})
 		}
-		mutex.RUnlock()
 	}
 	hs.kvs = kvs
 	hs.order = order
@@ -269,14 +264,16 @@ func (h Header) writeSubset(w io.Writer, exclude map[string]bool, trace *httptra
 		for i, v := range headerOrder {
 			order[v] = i
 		}
-		if exclude == nil {
-			exclude = make(map[string]bool)
-		}
-		mutex.Lock()
-		exclude[HeaderOrderKey] = true
-		exclude[PHeaderOrderKey] = true
-		mutex.Unlock()
-		kvs, sorter = h.SortedKeyValuesBy(order, exclude)
+		// Add the magic keys to a copy of exclude instead of mutating the
+		// caller's map: callers pass shared package-level maps (e.g.
+		// respExcludeHeader), so writing to exclude both raced with other
+		// writers and readers and leaked the exclusions into every later
+		// write that used the same map.
+		excl := make(map[string]bool, len(exclude)+2)
+		maps.Copy(excl, exclude)
+		excl[HeaderOrderKey] = true
+		excl[PHeaderOrderKey] = true
+		kvs, sorter = h.SortedKeyValuesBy(order, excl)
 	} else {
 		kvs, sorter = h.SortedKeyValues(exclude)
 	}
