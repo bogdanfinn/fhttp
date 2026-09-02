@@ -322,6 +322,7 @@ type ClientConn struct {
 
 	hbuf             bytes.Buffer // HPACK encoder writes into this
 	henc             *hpack.Encoder
+	hencMaxTableSize uint32 // effective max dynamic table size currently applied to henc (guarded by mu, like henc)
 	highestPromiseID uint32 // highest promise id so far received from server
 
 	idleTimeout time.Duration // or 0 for never
@@ -825,9 +826,14 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 
 	cc.fr.MaxHeaderListSize = t.maxHeaderListSize()
 
-	// TODO: SetMaxDynamicTableSize, SetMaxDynamicTableSizeLimit on
-	// henc in response to SETTINGS frames?
 	cc.henc = hpack.NewEncoder(&cc.hbuf)
+	// The encoder starts at the HPACK protocol-default dynamic table size
+	// (4096). We only ever shrink it in response to a peer SETTINGS frame
+	// advertising a smaller SETTINGS_HEADER_TABLE_SIZE (see processSettings);
+	// we never grow above 4096, matching browser encoders. Tracking the
+	// currently-applied size lets us avoid emitting a spurious Dynamic Table
+	// Size Update when the peer allows >= 4096 (the common case).
+	cc.hencMaxTableSize = initialHeaderTableSize
 
 	if t.AllowHTTP {
 		cc.nextStreamID = 3
@@ -2724,12 +2730,35 @@ func (rl *clientConnReadLoop) processSettings(f *SettingsFrame) error {
 			cc.cond.Broadcast()
 
 			cc.initialWindowSize = s.Val
+		case SettingHeaderTableSize:
+			// Honor the peer's advertised maximum HPACK dynamic table size
+			// for our request-header encoder (RFC 7541 §4.2 / §6.3). henc is
+			// guarded by cc.mu, which is held here.
+			//
+			// We cap the effective size at the protocol default (4096) — real
+			// browser encoders do not use larger dynamic tables — and only
+			// touch the encoder when the effective size actually changes.
+			// Consequently the common case, where the peer allows >= 4096, is
+			// a no-op and emits NO Dynamic Table Size Update, keeping our HPACK
+			// byte stream identical to a browser that stays at the default.
+			// The change bites only when a peer advertises a table size < 4096
+			// (e.g. 0): previously the encoder kept indexing up to 4096 in
+			// violation of the peer's limit; now it correctly shrinks and
+			// signals the update.
+			effectiveTableSize := s.Val
+			if effectiveTableSize > initialHeaderTableSize {
+				effectiveTableSize = initialHeaderTableSize
+			}
+			if effectiveTableSize != cc.hencMaxTableSize {
+				cc.henc.SetMaxDynamicTableSize(effectiveTableSize)
+				cc.hencMaxTableSize = effectiveTableSize
+			}
 		case SettingEnableConnectProtocol:
 			if err := s.Valid(); err != nil {
 				return err
 			}
 		default:
-			// TODO(bradfitz): handle more settings? SETTINGS_HEADER_TABLE_SIZE probably.
+			// TODO(bradfitz): handle more settings?
 			cc.vlogf("Unhandled Setting: %v", s)
 		}
 
