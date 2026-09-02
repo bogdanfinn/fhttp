@@ -8,7 +8,6 @@ package http
 
 import (
 	"bytes"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"testing"
 
 	tls "github.com/bogdanfinn/utls"
+	"github.com/klauspost/compress/gzip"
 
 	"github.com/bogdanfinn/fhttp/internal"
 )
