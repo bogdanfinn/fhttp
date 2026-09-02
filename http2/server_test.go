@@ -2553,6 +2553,9 @@ func TestServer_Rejects_TLS11(t *testing.T) { testRejectTLS(t, tls.VersionTLS11)
 
 func testRejectTLS(t *testing.T, max uint16) {
 	st := newServerTester(t, nil, func(c *tls.Config) {
+		// MinVersion has to be lowered as well: the default is TLS 1.2, and a
+		// config whose Min is above its Max cannot handshake at all.
+		c.MinVersion = max
 		c.MaxVersion = max
 	})
 	defer st.Close()
@@ -3747,8 +3750,10 @@ func TestCheckValidPushPromiseRequest(t *testing.T) {
 			want: errors.New(`promised request cannot include body related header "Trailer"`),
 		},
 		{
+			// fhttp's push handler passes a Host header through, so the
+			// upstream "Host disallowed" check is intentionally disabled.
 			h:    http.Header{"Host": {""}},
-			want: errors.New(`promised URL must be absolute so "Host" header disallowed`),
+			want: nil,
 		},
 	}
 	for i, tt := range tests {

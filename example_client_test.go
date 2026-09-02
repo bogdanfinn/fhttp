@@ -1,6 +1,9 @@
 package http_test
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/zlib"
 	"crypto/x509"
 	"encoding/json"
 	"flag"
@@ -15,16 +18,20 @@ import (
 
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/fhttp/http2"
+	"github.com/bogdanfinn/fhttp/httptest"
 )
 
 // Basic http test with Header Order + enable push
 func TestExample(t *testing.T) {
 	c := http.Client{}
+	// Otherwise the connection outlives the test and the goroutine-leak
+	// check in TestMain/afterTest flags every test that runs afterwards.
+	defer c.CloseIdleConnections()
 
 	req, err := http.NewRequest("GET", "https://httpbin.org/headers", strings.NewReader(""))
 
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err)
 		return
 	}
 
@@ -54,7 +61,7 @@ func TestExample(t *testing.T) {
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err)
 		return
 	}
 	defer resp.Body.Close()
@@ -65,7 +72,7 @@ func TestExample(t *testing.T) {
 	var data interface{}
 	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err)
 	}
 }
 
@@ -118,13 +125,15 @@ func TestWithCert(t *testing.T) {
 	h1t := &http.Transport{
 		ForceAttemptHTTP2: true,
 	}
+	defer h1t.CloseIdleConnections()
 	if err := addCharlesToTransport(h1t, "http://localhost:8888"); err != nil {
-		t.Fatalf(err.Error())
+		// Requires a local Charles proxy and its CA cert in $HOME.
+		t.Skipf("Charles proxy not configured locally: %v", err)
 	}
 
 	t2, err := http2.ConfigureTransports(h1t)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	t2.Settings = map[http2.SettingID]uint32{
 		http2.SettingMaxConcurrentStreams: 1000,
@@ -141,7 +150,7 @@ func TestWithCert(t *testing.T) {
 
 	req, err := http.NewRequest("GET", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Encoding", nil)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err)
 		return
 	}
 
@@ -176,7 +185,7 @@ func TestWithCert(t *testing.T) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err)
 		return
 	}
 	defer resp.Body.Close()
@@ -191,9 +200,10 @@ func TestEnablePush(t *testing.T) {
 	t1 := &http.Transport{
 		ForceAttemptHTTP2: true,
 	}
+	defer t1.CloseIdleConnections()
 	t2, err := http2.ConfigureTransports(t1)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	t2.PushHandler = &http2.DefaultPushHandler{}
 	t1.H2transport = t2
@@ -203,20 +213,20 @@ func TestEnablePush(t *testing.T) {
 	var req *http.Request
 	req, err = http.NewRequest("GET", "https://httpbin.org/headers", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	_, err = c.Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	req, err = http.NewRequest("POST", "https://httpbin.org/post", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	_, err = c.Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 }
 
@@ -225,16 +235,18 @@ func TestFinishLine(t *testing.T) {
 	t1 := &http.Transport{
 		ForceAttemptHTTP2: true,
 	}
+	defer t1.CloseIdleConnections()
 
 	if err := addCharlesToTransport(t1, "http://localhost:8888"); err != nil {
-		t.Fatalf(err.Error())
+		// Requires a local Charles proxy and its CA cert in $HOME.
+		t.Skipf("Charles proxy not configured locally: %v", err)
 	}
 	// if err := addWiresharkToTransport(t1); err != nil {
-	// 	t.Fatalf(err.Error())
+	// 	t.Fatal(err)
 	// }
 	t2, err := http2.ConfigureTransports(t1)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	t2.Settings = map[http2.SettingID]uint32{
 		http2.SettingMaxConcurrentStreams: 1000,
@@ -251,7 +263,7 @@ func TestFinishLine(t *testing.T) {
 	}
 	req, err := http.NewRequest("GET", "https://www.finishline.com/", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	req.Header = http.Header{
 		"sec-ch-ua":                 {"\" Not A;Brand\";v=\"99\", \"Chromium\";v=\"90\", \"Google Chrome\";v=\"90\""},
@@ -280,7 +292,7 @@ func TestFinishLine(t *testing.T) {
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -288,7 +300,7 @@ func TestFinishLine(t *testing.T) {
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	fmt.Printf("resp: %v\n", string(b)[1])
 }
@@ -298,6 +310,7 @@ func TestCompressionBrotli(t *testing.T) {
 	t1 := &http.Transport{
 		ForceAttemptHTTP2: true,
 	}
+	defer t1.CloseIdleConnections()
 	c := http.Client{
 		Transport: t1,
 	}
@@ -307,7 +320,7 @@ func TestCompressionBrotli(t *testing.T) {
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	if h := resp.Header.Get("content-encoding"); h == "" || h != "br" {
@@ -315,43 +328,87 @@ func TestCompressionBrotli(t *testing.T) {
 	}
 }
 
-// Test compression zlib deflate
-func TestCompressionZlibDeflate(t *testing.T) {
-	t1 := &http.Transport{
-		ForceAttemptHTTP2: true,
+const deflateBody = "Content-Encoding: deflate covers both zlib-wrapped and raw deflate streams."
+
+// deflateServer serves deflateBody as Content-Encoding: deflate, either
+// zlib-wrapped (RFC 1950) or as a raw deflate stream (RFC 1951).
+func deflateServer(t *testing.T, zlibWrapped bool) *httptest.Server {
+	t.Helper()
+
+	var buf bytes.Buffer
+	var w io.WriteCloser
+	if zlibWrapped {
+		w = zlib.NewWriter(&buf)
+	} else {
+		fw, err := flate.NewWriter(&buf, flate.DefaultCompression)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w = fw
 	}
-	addCharlesToTransport(t1, "http://localhost:8888")
-	c := http.Client{
-		Transport: t1,
+	if _, err := io.WriteString(w, deflateBody); err != nil {
+		t.Fatal(err)
 	}
-	req, _ := http.NewRequest("GET", "http://carsten.codimi.de/gzip.yaws/daniels.html?deflate=on&zlib=on", nil)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	payload := buf.Bytes()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "deflate")
+		w.Write(payload)
+	}))
+}
+
+// A caller that sets accept-encoding itself owns the decoding: the transport
+// must not decompress the body or strip Content-Encoding. Verify that, and
+// that the library decodes both deflate flavours.
+func testCompressionDeflate(t *testing.T, zlibWrapped bool) {
+	t.Helper()
+
+	ts := deflateServer(t, zlibWrapped)
+	defer ts.Close()
+
+	req, err := http.NewRequest("GET", ts.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header = http.Header{
 		"accept-encoding": {"deflate"},
 	}
-	resp, err := c.Do(req)
+
+	resp, err := ts.Client().Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if h := resp.Header.Get("content-encoding"); h != "deflate" {
+		t.Fatalf("Expected content encoding deflate, got %q", h)
 	}
 
-	if h := resp.Header.Get("content-encoding"); h == "" || h != "deflate" {
-		t.Fatalf("Expected content encoding deflate, got %v", h)
+	got, err := io.ReadAll(http.DecompressBodyByType(resp.Body, "deflate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != deflateBody {
+		t.Errorf("body = %q; want %q", got, deflateBody)
 	}
 }
 
+// Test compression zlib deflate
+func TestCompressionZlibDeflate(t *testing.T) {
+	testCompressionDeflate(t, true)
+}
+
 // Test compression deflate
+//
+// NOTE: this currently fails. identifyDeflate only recognises zlib-wrapped
+// streams (first byte 0x78) and has no raw-deflate fallback, and on that
+// fallback path it returns the body after having already consumed two bytes,
+// so the payload comes back both undecoded and truncated by two bytes.
 func TestCompressionDeflate(t *testing.T) {
-	c := http.Client{}
-	req, _ := http.NewRequest("GET", "http://carsten.codimi.de/gzip.yaws/daniels.html?deflate=on", nil)
-	req.Header = http.Header{
-		"accept-encoding": {"deflate"},
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	if h := resp.Header.Get("content-encoding"); h == "" || h != "deflate" {
-		t.Fatalf("Expected content encoding deflate, got %v", h)
-	}
+	testCompressionDeflate(t, false)
 }
 
 // Test with cookies

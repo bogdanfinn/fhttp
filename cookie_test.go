@@ -101,19 +101,19 @@ var writeSetCookiesTests = []struct {
 	},
 	{
 		&Cookie{Name: "special-5", Value: "a,z"},
-		`special-5="a,z"`,
+		`special-5=a,z`,
 	},
 	{
 		&Cookie{Name: "special-6", Value: ",z"},
-		`special-6=",z"`,
+		`special-6=,z`,
 	},
 	{
 		&Cookie{Name: "special-7", Value: "a,"},
-		`special-7="a,"`,
+		`special-7=a,`,
 	},
 	{
 		&Cookie{Name: "special-8", Value: ","},
-		`special-8=","`,
+		`special-8=,`,
 	},
 	{
 		&Cookie{Name: "empty-value", Value: ""},
@@ -326,15 +326,15 @@ var readSetCookiesTests = []struct {
 	},
 	{
 		Header{"Set-Cookie": {`special-2=" z"`}},
-		[]*Cookie{{Name: "special-2", Value: " z", Raw: `special-2=" z"`}},
+		[]*Cookie{{Name: "special-2", Value: " z", Quoted: true, Raw: `special-2=" z"`}},
 	},
 	{
 		Header{"Set-Cookie": {`special-3="a "`}},
-		[]*Cookie{{Name: "special-3", Value: "a ", Raw: `special-3="a "`}},
+		[]*Cookie{{Name: "special-3", Value: "a ", Quoted: true, Raw: `special-3="a "`}},
 	},
 	{
 		Header{"Set-Cookie": {`special-4=" "`}},
-		[]*Cookie{{Name: "special-4", Value: " ", Raw: `special-4=" "`}},
+		[]*Cookie{{Name: "special-4", Value: " ", Quoted: true, Raw: `special-4=" "`}},
 	},
 	{
 		Header{"Set-Cookie": {`special-5=a,z`}},
@@ -342,7 +342,7 @@ var readSetCookiesTests = []struct {
 	},
 	{
 		Header{"Set-Cookie": {`special-6=",z"`}},
-		[]*Cookie{{Name: "special-6", Value: ",z", Raw: `special-6=",z"`}},
+		[]*Cookie{{Name: "special-6", Value: ",z", Quoted: true, Raw: `special-6=",z"`}},
 	},
 	{
 		Header{"Set-Cookie": {`special-7=a,`}},
@@ -350,7 +350,7 @@ var readSetCookiesTests = []struct {
 	},
 	{
 		Header{"Set-Cookie": {`special-8=","`}},
-		[]*Cookie{{Name: "special-8", Value: ",", Raw: `special-8=","`}},
+		[]*Cookie{{Name: "special-8", Value: ",", Quoted: true, Raw: `special-8=","`}},
 	},
 
 	// TODO(bradfitz): users have reported seeing this in the
@@ -419,15 +419,15 @@ var readCookiesTests = []struct {
 		Header{"Cookie": {`Cookie-1="v$1"; c2="v2"`}},
 		"",
 		[]*Cookie{
-			{Name: "Cookie-1", Value: "v$1"},
-			{Name: "c2", Value: "v2"},
+			{Name: "Cookie-1", Value: "v$1", Quoted: true},
+			{Name: "c2", Value: "v2", Quoted: true},
 		},
 	},
 	{
 		Header{"Cookie": {`Cookie-1="v$1"; c2=v2;`}},
 		"",
 		[]*Cookie{
-			{Name: "Cookie-1", Value: "v$1"},
+			{Name: "Cookie-1", Value: "v$1", Quoted: true},
 			{Name: "c2", Value: "v2"},
 		},
 	},
@@ -485,15 +485,15 @@ func TestCookieSanitizeValue(t *testing.T) {
 		{"foo", "foo"},
 		{"foo;bar", "foobar"},
 		{"foo\\bar", "foobar"},
-		{"foo\"bar", "foobar"},
+		{"foo\"bar", "foo\"bar"},
 		{"\x00\x7e\x7f\x80", "\x7e"},
-		{`"withquotes"`, "withquotes"},
+		{`"withquotes"`, `"withquotes"`},
 		{"a z", `"a z"`},
 		{" z", `" z"`},
 		{"a ", `"a "`},
-		{"a,z", `"a,z"`},
-		{",z", `",z"`},
-		{"a,", `"a,"`},
+		{"a,z", "a,z"},
+		{",z", ",z"},
+		{"a,", "a,"},
 	}
 	for _, tt := range tests {
 		if got := sanitizeCookieValue(tt.in, false); got != tt.want {

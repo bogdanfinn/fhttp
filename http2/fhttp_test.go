@@ -36,7 +36,7 @@ func TestConnectionSettings(t *testing.T) {
 	err := fr.WriteSettings(settings...)
 
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	f, err := fr.ReadFrame()
@@ -103,7 +103,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	req, err := http.NewRequest("GET", "www.google.com", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	tr.RoundTrip(req)
 }
@@ -132,13 +132,13 @@ func TestContentLength(t *testing.T) {
 	form.Add("Hello", "World")
 	req, err := http.NewRequest("POST", u, strings.NewReader(form.Encode()))
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	req.Header.Add("user-agent", "Go Testing")
 
 	resp, err := ts.Client().Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 }
@@ -148,7 +148,7 @@ func TestClient_SendsCookies(t *testing.T) {
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("cookie")
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 		if cookie.Value == "" {
 			t.Fatalf("Cookie value is empty")
@@ -162,19 +162,19 @@ func TestClient_SendsCookies(t *testing.T) {
 		PublicSuffixList: publicsuffix.List,
 	})
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	c.Jar = jar
 	ur := ts.URL
 	u, err := url.Parse(ur)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	cookies := []*http.Cookie{{Name: "cookie", Value: "Hello world"}}
 	jar.SetCookies(u, cookies)
 	resp, err := c.Get(ur)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 }
@@ -183,12 +183,12 @@ func TestClient_SendsCookies(t *testing.T) {
 func TestClient_Load(t *testing.T) {
 	u, err := url.Parse("http://localhost:8888")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	pool, err := getCharlesCert()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	c := http.Client{
 		Transport: &http.Transport{
@@ -201,12 +201,12 @@ func TestClient_Load(t *testing.T) {
 	}
 	req, err := http.NewRequest("GET", "https://golang.org/pkg/net/mail/#Address", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	for i := 0; i < 10; i++ {
 		resp, err := c.Do(req)
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 		resp.Body.Close()
 	}
@@ -215,12 +215,12 @@ func TestClient_Load(t *testing.T) {
 func TestGClient_Load(t *testing.T) {
 	u, err := url.Parse("http://localhost:8888")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	pool, err := getCharlesCert()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	c := ghttp.Client{
 		Transport: &ghttp.Transport{
@@ -233,12 +233,12 @@ func TestGClient_Load(t *testing.T) {
 	}
 	req, err := ghttp.NewRequest("GET", "https://golang.org/pkg/net/mail/#Address", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	for i := 0; i < 10; i++ {
 		err := do(&c, req)
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 	}
 }

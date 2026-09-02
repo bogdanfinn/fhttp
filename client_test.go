@@ -952,7 +952,7 @@ func TestResponseSetsTLSConnectionState(t *testing.T) {
 
 	c := ts.Client()
 	tr := c.Transport.(*Transport)
-	tr.TLSClientConfig.CipherSuites = []uint16{tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA}
+	tr.TLSClientConfig.CipherSuites = []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
 	tr.TLSClientConfig.MaxVersion = tls.VersionTLS12 // to get to pick the cipher suite
 	tr.Dial = func(netw, addr string) (net.Conn, error) {
 		return net.Dial(netw, ts.Listener.Addr().String())
@@ -965,7 +965,7 @@ func TestResponseSetsTLSConnectionState(t *testing.T) {
 	if res.TLS == nil {
 		t.Fatal("Response didn't set TLS Connection State.")
 	}
-	if got, want := res.TLS.CipherSuite, tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA; got != want {
+	if got, want := res.TLS.CipherSuite, tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256; got != want {
 		t.Errorf("TLS Cipher Suite = %d; want %d", got, want)
 	}
 }
@@ -1454,7 +1454,7 @@ func TestClientCopyHeadersOnRedirect(t *testing.T) {
 			"User-Agent":      []string{ua},
 			"X-Foo":           []string{xfoo},
 			"Referer":         []string{ts2URL},
-			"Accept-Encoding": []string{"gzip"},
+			"Accept-Encoding": []string{"gzip, deflate, br"},
 		}
 		if !reflect.DeepEqual(r.Header, want) {
 			t.Errorf("Request.Header = %#v; want %#v", r.Header, want)

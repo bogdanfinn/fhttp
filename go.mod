@@ -2,7 +2,7 @@ module github.com/bogdanfinn/fhttp
 
 go 1.24.1
 
-toolchain go1.24.4
+// toolchain go1.24.4
 
 require (
 	github.com/andybalholm/brotli v1.1.1

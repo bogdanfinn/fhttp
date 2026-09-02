@@ -13,7 +13,7 @@ import (
 func TestHeaderOrder(t *testing.T) {
 	req, err := http.NewRequest("POST", "https://www.httpbin.org/headers", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	req.Header = http.Header{
 		"sec-ch-ua":        {"\" Not;A Brand\";v=\"99\", \"Google Chrome\";v=\"91\", \"Chromium\";v=\"91\""},
@@ -54,7 +54,7 @@ func TestHeaderOrder(t *testing.T) {
 	buf := bytes.NewBuffer(b)
 	err = req.Header.Write(buf)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	arr := strings.Split(buf.String(), "\n")
 	var hdrs []string
@@ -82,7 +82,7 @@ func TestHeaderOrder2(t *testing.T) {
 	}
 	req, err := http.NewRequest("GET", "https://httpbin.org/#/Request_inspection/get_headers", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	req.Header.Add("experience", "pain")
 	req.Header.Add("grind", "harder")
@@ -106,7 +106,7 @@ func TestHeaderOrder2(t *testing.T) {
 func TestHeaderOrder3(t *testing.T) {
 	req, err := http.NewRequest("GET", "https://google.com", nil)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	req.Header = http.Header{
 		http.HeaderOrderKey: {
@@ -146,7 +146,7 @@ func TestHeaderOrder3(t *testing.T) {
 	tr := Transport{}
 	resp, err := tr.RoundTrip(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	log.Println(hdrs)

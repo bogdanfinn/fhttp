@@ -1647,7 +1647,9 @@ func TestTransportChecksRequestHeaderListSize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("headerListSizeForRequest: %v", err)
 		}
-		cc := &ClientConn{peerMaxHeaderListSize: 0xffffffffffffffff}
+		// encodeHeaders consults cc.t (for PseudoHeaderOrder), so the
+		// ClientConn needs a Transport.
+		cc := &ClientConn{t: tr, peerMaxHeaderListSize: 0xffffffffffffffff}
 		cc.henc = hpack.NewEncoder(&cc.hbuf)
 		cc.mu.Lock()
 		hdrs, err := cc.encodeHeaders(req, true, trailers, contentLen)

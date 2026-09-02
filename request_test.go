@@ -35,7 +35,7 @@ func TestQuery(t *testing.T) {
 
 func TestParseFormQuery(t *testing.T) {
 	req, _ := NewRequest("POST", "http://www.google.com/search?q=foo&q=bar&both=x&prio=1&orphan=nope&empty=not",
-		strings.NewReader("z=post&both=y&prio=2&=nokey&orphan;empty=&"))
+		strings.NewReader("z=post&both=y&prio=2&=nokey&orphan&empty=&"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; param=value")
 
 	if q := req.FormValue("q"); q != "foo" {
@@ -702,10 +702,13 @@ func TestRequestWriteBufferedWriter(t *testing.T) {
 	got := []string{}
 	req, _ := NewRequest("GET", "http://foo.com/", nil)
 	req.Write(logWrites{t, &got})
+	// fhttp writes Host and User-Agent through the ordered header map rather
+	// than as pre-joined lines, so each field arrives as key / ": " / value /
+	// CRLF. Callers normally wrap the writer in a bufio.Writer.
 	want := []string{
 		"GET / HTTP/1.1\r\n",
-		"Host: foo.com\r\n",
-		"User-Agent: " + DefaultUserAgent + "\r\n",
+		"Host", ": ", "foo.com", "\r\n",
+		"User-Agent", ": ", DefaultUserAgent, "\r\n",
 		"\r\n",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -722,10 +725,13 @@ func TestRequestBadHost(t *testing.T) {
 	req.Host = "foo.com with spaces"
 	req.URL.Host = "foo.com with spaces"
 	req.Write(logWrites{t, &got})
+	// fhttp writes Host and User-Agent through the ordered header map rather
+	// than as pre-joined lines, so each field arrives as key / ": " / value /
+	// CRLF. Callers normally wrap the writer in a bufio.Writer.
 	want := []string{
 		"GET /after HTTP/1.1\r\n",
-		"Host: foo.com\r\n",
-		"User-Agent: " + DefaultUserAgent + "\r\n",
+		"Host", ": ", "foo.com", "\r\n",
+		"User-Agent", ": ", DefaultUserAgent, "\r\n",
 		"\r\n",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -969,7 +975,7 @@ func testMissingFile(t *testing.T, req *Request) {
 		t.Errorf("FormFile file = %v, want nil", f)
 	}
 	if fh != nil {
-		t.Errorf("FormFile file header = %q, want nil", fh)
+		t.Errorf("FormFile file header = %v, want nil", fh)
 	}
 	if err != ErrMissingFile {
 		t.Errorf("FormFile err = %q, want ErrMissingFile", err)

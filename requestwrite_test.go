@@ -58,24 +58,24 @@ var reqWriteTests = []reqWriteTest{
 		},
 
 		WantWrite: "GET / HTTP/1.1\r\n" +
-			"Host: www.techcrunch.com\r\n" +
-			"User-Agent: Fake\r\n" +
 			"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" +
 			"Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\n" +
 			"Accept-Encoding: gzip,deflate\r\n" +
 			"Accept-Language: en-us,en;q=0.5\r\n" +
+			"Host: www.techcrunch.com\r\n" +
 			"Keep-Alive: 300\r\n" +
-			"Proxy-Connection: keep-alive\r\n\r\n",
+			"Proxy-Connection: keep-alive\r\n" +
+			"User-Agent: Fake\r\n\r\n",
 
 		WantProxy: "GET http://www.techcrunch.com/ HTTP/1.1\r\n" +
-			"Host: www.techcrunch.com\r\n" +
-			"User-Agent: Fake\r\n" +
 			"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" +
 			"Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\n" +
 			"Accept-Encoding: gzip,deflate\r\n" +
 			"Accept-Language: en-us,en;q=0.5\r\n" +
+			"Host: www.techcrunch.com\r\n" +
 			"Keep-Alive: 300\r\n" +
-			"Proxy-Connection: keep-alive\r\n\r\n",
+			"Proxy-Connection: keep-alive\r\n" +
+			"User-Agent: Fake\r\n\r\n",
 	},
 	// HTTP/1.1 => chunked coding; body; empty trailer
 	1: {
@@ -96,14 +96,14 @@ var reqWriteTests = []reqWriteTest{
 
 		WantWrite: "GET /search HTTP/1.1\r\n" +
 			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("abcdef") + chunk(""),
 
 		WantProxy: "GET http://www.google.com/search HTTP/1.1\r\n" +
 			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("abcdef") + chunk(""),
 	},
 	// HTTP/1.1 POST => chunked coding; body; empty trailer
@@ -125,17 +125,17 @@ var reqWriteTests = []reqWriteTest{
 		Body: []byte("abcdef"),
 
 		WantWrite: "POST /search HTTP/1.1\r\n" +
-			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Connection: close\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Host: www.google.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("abcdef") + chunk(""),
 
 		WantProxy: "POST http://www.google.com/search HTTP/1.1\r\n" +
-			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Connection: close\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Host: www.google.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("abcdef") + chunk(""),
 	},
 
@@ -158,18 +158,18 @@ var reqWriteTests = []reqWriteTest{
 		Body: []byte("abcdef"),
 
 		WantWrite: "POST /search HTTP/1.1\r\n" +
-			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Connection: close\r\n" +
 			"Content-Length: 6\r\n" +
+			"Host: www.google.com\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n" +
 			"\r\n" +
 			"abcdef",
 
 		WantProxy: "POST http://www.google.com/search HTTP/1.1\r\n" +
-			"Host: www.google.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Connection: close\r\n" +
 			"Content-Length: 6\r\n" +
+			"Host: www.google.com\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n" +
 			"\r\n" +
 			"abcdef",
 	},
@@ -189,16 +189,16 @@ var reqWriteTests = []reqWriteTest{
 		Body: []byte("abcdef"),
 
 		WantWrite: "POST / HTTP/1.1\r\n" +
+			"Content-Length: 6\r\n" +
 			"Host: example.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 6\r\n" +
 			"\r\n" +
 			"abcdef",
 
 		WantProxy: "POST http://example.com/ HTTP/1.1\r\n" +
+			"Content-Length: 6\r\n" +
 			"Host: example.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 6\r\n" +
 			"\r\n" +
 			"abcdef",
 	},
@@ -232,14 +232,14 @@ var reqWriteTests = []reqWriteTest{
 
 		WantWrite: "POST / HTTP/1.1\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n" +
 			"\r\n0\r\n\r\n",
 
 		WantProxy: "POST / HTTP/1.1\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
 			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n" +
 			"\r\n0\r\n\r\n",
 	},
 
@@ -257,15 +257,15 @@ var reqWriteTests = []reqWriteTest{
 		Body: func() io.ReadCloser { return nil },
 
 		WantWrite: "POST / HTTP/1.1\r\n" +
+			"Content-Length: 0\r\n" +
 			"Host: example.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 0\r\n" +
 			"\r\n",
 
 		WantProxy: "POST / HTTP/1.1\r\n" +
+			"Content-Length: 0\r\n" +
 			"Host: example.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 0\r\n" +
 			"\r\n",
 	},
 
@@ -284,14 +284,14 @@ var reqWriteTests = []reqWriteTest{
 
 		WantWrite: "POST / HTTP/1.1\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("x") + chunk(""),
 
 		WantProxy: "POST / HTTP/1.1\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Transfer-Encoding: chunked\r\n\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"User-Agent: Go-http-client/1.1\r\n\r\n" +
 			chunk("x") + chunk(""),
 	},
 
@@ -415,8 +415,11 @@ var reqWriteTests = []reqWriteTest{
 			},
 		},
 
+		// fhttp honours an explicit Host entry in Request.Header (header
+		// control is the point of this fork); upstream ignores it in favour
+		// of Request.Host / URL.Host.
 		WantWrite: "GET /search HTTP/1.1\r\n" +
-			"Host: \r\n" +
+			"Host: bad.example.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n\r\n",
 	},
 
@@ -476,9 +479,9 @@ var reqWriteTests = []reqWriteTest{
 		},
 
 		WantWrite: "GET / HTTP/1.1\r\n" +
+			"ALL-CAPS: x\r\n" +
 			"Host: www.google.com\r\n" +
 			"User-Agent: Go-http-client/1.1\r\n" +
-			"ALL-CAPS: x\r\n" +
 			"\r\n",
 	},
 
@@ -599,13 +602,13 @@ var reqWriteTests = []reqWriteTest{
 		},
 		Body: nil,
 		WantWrite: "PATCH / HTTP/1.1\r\n" +
+			"Content-Length: 0\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 0\r\n\r\n",
+			"User-Agent: Go-http-client/1.1\r\n\r\n",
 		WantProxy: "PATCH / HTTP/1.1\r\n" +
+			"Content-Length: 0\r\n" +
 			"Host: example.com\r\n" +
-			"User-Agent: Go-http-client/1.1\r\n" +
-			"Content-Length: 0\r\n\r\n",
+			"User-Agent: Go-http-client/1.1\r\n\r\n",
 	},
 }
 
@@ -824,8 +827,8 @@ func TestRequestWriteClosesBody(t *testing.T) {
 	}
 	expected := "POST / HTTP/1.1\r\n" +
 		"Host: foo.com\r\n" +
-		"User-Agent: Go-http-client/1.1\r\n" +
-		"Transfer-Encoding: chunked\r\n\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"User-Agent: Go-http-client/1.1\r\n\r\n" +
 		chunk("my body") +
 		chunk("")
 	if buf.String() != expected {
@@ -874,7 +877,7 @@ func TestRequestWriteError(t *testing.T) {
 	}
 
 	req, _ := NewRequest("GET", "http://example.com/", nil)
-	const writeCalls = 4 // number of Write calls in current implementation
+	const writeCalls = 10 // number of Write calls in current implementation
 	sawGood := false
 	for n := 0; n <= writeCalls+2; n++ {
 		failAfter = n

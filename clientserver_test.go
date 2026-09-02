@@ -1162,8 +1162,14 @@ func testTransportRejectsInvalidHeaders(t *testing.T, h2 bool) {
 
 func TestInterruptWithPanic_h1(t *testing.T)     { testInterruptWithPanic(t, h1Mode, "boom") }
 func TestInterruptWithPanic_h2(t *testing.T)     { testInterruptWithPanic(t, h2Mode, "boom") }
-func TestInterruptWithPanic_nil_h1(t *testing.T) { testInterruptWithPanic(t, h1Mode, nil) }
-func TestInterruptWithPanic_nil_h2(t *testing.T) { testInterruptWithPanic(t, h2Mode, nil) }
+func TestInterruptWithPanic_nil_h1(t *testing.T) {
+	t.Setenv("GODEBUG", "panicnil=1")
+	testInterruptWithPanic(t, h1Mode, nil)
+}
+func TestInterruptWithPanic_nil_h2(t *testing.T) {
+	t.Setenv("GODEBUG", "panicnil=1")
+	testInterruptWithPanic(t, h2Mode, nil)
+}
 func TestInterruptWithPanic_ErrAbortHandler_h1(t *testing.T) {
 	testInterruptWithPanic(t, h1Mode, ErrAbortHandler)
 }
@@ -1490,9 +1496,9 @@ func testWriteHeaderAfterWrite(t *testing.T, h2, hijack bool) {
 		return
 	}
 	gotLog := strings.TrimSpace(errorLog.String())
-	wantLog := "http: superfluous response.WriteHeader call from net/http_test.testWriteHeaderAfterWrite.func1 (clientserver_test.go:"
+	wantLog := "http: superfluous response.WriteHeader call from github.com/bogdanfinn/fhttp_test.testWriteHeaderAfterWrite.func1 (clientserver_test.go:"
 	if hijack {
-		wantLog = "http: response.WriteHeader on hijacked connection from net/http_test.testWriteHeaderAfterWrite.func1 (clientserver_test.go:"
+		wantLog = "http: response.WriteHeader on hijacked connection from github.com/bogdanfinn/fhttp_test.testWriteHeaderAfterWrite.func1 (clientserver_test.go:"
 	}
 	if !strings.HasPrefix(gotLog, wantLog) {
 		t.Errorf("stderr output = %q; want %q", gotLog, wantLog)
