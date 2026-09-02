@@ -2456,7 +2456,7 @@ func (b transportResponseBody) Read(p []byte) (n int, err error) {
 		// stream.
 
 		// Use dynamic streamFlow logic
-		unsent := int(cc.streamFlow) - int(cs.inflow.available()) + cs.bufPipe.Len()
+		unsent := int(cc.streamFlow) - int(cs.inflow.available()) - cs.bufPipe.Len()
 
 		// ------------------------------------------------------------------
 		// FIX: Adaptive Logic
