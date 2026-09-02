@@ -220,6 +220,10 @@ func (h Header) SortedKeyValues(exclude map[string]bool) (kvs []HeaderKeyValues,
 		}
 	}
 	hs.kvs = kvs
+	// Reset any order left on the sorter by a previous SortedKeyValuesBy
+	// call, otherwise a pooled sorter sorts by the stale order instead of
+	// lexicographically.
+	hs.order = nil
 	sort.Sort(hs)
 	return kvs, hs
 }
