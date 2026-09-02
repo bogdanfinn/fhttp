@@ -178,19 +178,31 @@ type HeaderKeyValues struct {
 type headerSorter struct {
 	kvs   []HeaderKeyValues
 	order map[string]int
+	// orderIdx[i], orderOK[i] cache order[strings.ToLower(kvs[i].Key)],
+	// resolved once per sort by SortedKeyValuesBy so that Less does no
+	// map lookups or lowercasing per comparison. Populated only when
+	// order is non-nil.
+	orderIdx []int
+	orderOK  []bool
 }
 
-func (s *headerSorter) Len() int      { return len(s.kvs) }
-func (s *headerSorter) Swap(i, j int) { s.kvs[i], s.kvs[j] = s.kvs[j], s.kvs[i] }
+func (s *headerSorter) Len() int { return len(s.kvs) }
+func (s *headerSorter) Swap(i, j int) {
+	s.kvs[i], s.kvs[j] = s.kvs[j], s.kvs[i]
+	// orderIdx/orderOK are only populated by SortedKeyValuesBy;
+	// SortedKeyValues sorts without them.
+	if s.order != nil {
+		s.orderIdx[i], s.orderIdx[j] = s.orderIdx[j], s.orderIdx[i]
+		s.orderOK[i], s.orderOK[j] = s.orderOK[j], s.orderOK[i]
+	}
+}
 func (s *headerSorter) Less(i, j int) bool {
 	// If the order isn't defined, sort lexicographically.
 	if s.order == nil {
 		return s.kvs[i].Key < s.kvs[j].Key
 	}
-	//idxi, iok := s.order[s.kvs[i].Key]
-	//idxj, jok := s.order[s.kvs[j].Key]
-	idxi, iok := s.order[strings.ToLower(s.kvs[i].Key)]
-	idxj, jok := s.order[strings.ToLower(s.kvs[j].Key)]
+	idxi, iok := s.orderIdx[i], s.orderOK[i]
+	idxj, jok := s.orderIdx[j], s.orderOK[j]
 	if !iok && !jok {
 		return s.kvs[i].Key < s.kvs[j].Key
 	} else if !iok && jok {
@@ -241,6 +253,20 @@ func (h Header) SortedKeyValuesBy(order map[string]int, exclude map[string]bool)
 	}
 	hs.kvs = kvs
 	hs.order = order
+
+	// Decorate-sort-undecorate: resolve each key's order lookup once, so
+	// Less compares the cached results instead of doing two map lookups
+	// (with key lowercasing) per comparison.
+	if cap(hs.orderIdx) < len(kvs) {
+		hs.orderIdx = make([]int, len(kvs))
+		hs.orderOK = make([]bool, len(kvs))
+	}
+	hs.orderIdx = hs.orderIdx[:len(kvs)]
+	hs.orderOK = hs.orderOK[:len(kvs)]
+	for i, kv := range kvs {
+		hs.orderIdx[i], hs.orderOK[i] = order[strings.ToLower(kv.Key)]
+	}
+
 	sort.Sort(hs)
 
 	return kvs, hs

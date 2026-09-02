@@ -7,8 +7,10 @@ package http
 import (
 	"bytes"
 	"io"
+	"math/rand"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -465,6 +467,195 @@ func TestHeaderSorterPoolReuse(t *testing.T) {
 	for i := 1; i < len(kvs); i++ {
 		if kvs[i-1].Key > kvs[i].Key {
 			t.Fatalf("keys not sorted lexicographically: %q before %q", kvs[i-1].Key, kvs[i].Key)
+		}
+	}
+}
+
+func TestSortedKeyValuesBy(t *testing.T) {
+	tests := []struct {
+		name  string
+		h     Header
+		order map[string]int
+		want  []string
+	}{
+		{
+			name: "all keys in order",
+			h: Header{
+				"Accept":     {"*/*"},
+				"User-Agent": {"x"},
+				"Referer":    {"y"},
+			},
+			order: map[string]int{"user-agent": 0, "referer": 1, "accept": 2},
+			want:  []string{"User-Agent", "Referer", "Accept"},
+		},
+		{
+			name: "keys absent from order sort lexicographically after ordered keys",
+			h: Header{
+				"Zeta":       {"z"},
+				"Alpha":      {"a"},
+				"Mid":        {"m"},
+				"In-Order":   {"x"},
+				"Also-Order": {"y"},
+			},
+			order: map[string]int{"in-order": 0, "also-order": 1},
+			want:  []string{"In-Order", "Also-Order", "Alpha", "Mid", "Zeta"},
+		},
+		{
+			name: "order lookup lowercases header keys",
+			h: Header{
+				"CONTENT-TYPE": {"a"},
+				"Accept":       {"b"},
+			},
+			order: map[string]int{"content-type": 0, "accept": 1},
+			want:  []string{"CONTENT-TYPE", "Accept"},
+		},
+		{
+			name: "no keys in order is fully lexicographic",
+			h: Header{
+				"B": {"1"},
+				"A": {"2"},
+				"C": {"3"},
+			},
+			order: map[string]int{"unrelated": 0},
+			want:  []string{"A", "B", "C"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kvs, hs := tt.h.SortedKeyValuesBy(tt.order, nil)
+			got := make([]string, 0, len(kvs))
+			for _, kv := range kvs {
+				got = append(got, kv.Key)
+			}
+			headerSorterPool.Put(hs)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("SortedKeyValuesBy(%v) key order = %v, want %v", tt.order, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortedKeyValuesByPoolReuse(t *testing.T) {
+	// Reuse one pooled sorter across ordered sorts of different sizes,
+	// with an orderless sort in between; per-sort state must be resized
+	// and repopulated on every call.
+	sortKeys := func(h Header, order map[string]int) []string {
+		var kvs []HeaderKeyValues
+		var hs *headerSorter
+		if order != nil {
+			kvs, hs = h.SortedKeyValuesBy(order, nil)
+		} else {
+			kvs, hs = h.SortedKeyValues(nil)
+		}
+		got := make([]string, 0, len(kvs))
+		for _, kv := range kvs {
+			got = append(got, kv.Key)
+		}
+		headerSorterPool.Put(hs)
+		return got
+	}
+
+	big := Header{"A": {"1"}, "B": {"2"}, "C": {"3"}, "D": {"4"}, "E": {"5"}}
+	bigOrder := map[string]int{"e": 0, "d": 1, "c": 2, "b": 3, "a": 4}
+	if got, want := sortKeys(big, bigOrder), []string{"E", "D", "C", "B", "A"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("big ordered sort = %v, want %v", got, want)
+	}
+
+	small := Header{"Y": {"1"}, "X": {"2"}}
+	if got, want := sortKeys(small, map[string]int{"y": 0, "x": 1}), []string{"Y", "X"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("small ordered sort after big = %v, want %v", got, want)
+	}
+
+	if got, want := sortKeys(big, nil), []string{"A", "B", "C", "D", "E"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("orderless sort after ordered = %v, want %v", got, want)
+	}
+
+	if got, want := sortKeys(big, bigOrder), []string{"E", "D", "C", "B", "A"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ordered sort after orderless = %v, want %v", got, want)
+	}
+}
+
+func TestSortedKeyValuesByDuplicateOrderValues(t *testing.T) {
+	// A Header-Order: list with a repeated entry produces an order map
+	// whose values can reach or exceed len(order), e.g. ["c","a","c"]
+	// gives {"c": 2, "a": 1}. Keys present in the order map must still
+	// sort ahead of absent keys.
+	h := Header{
+		"Charlie": {"1"},
+		"Alpha":   {"2"},
+		"Mango":   {"3"}, // absent from order
+	}
+	order := map[string]int{"charlie": 2, "alpha": 1}
+	kvs, hs := h.SortedKeyValuesBy(order, nil)
+	got := make([]string, 0, len(kvs))
+	for _, kv := range kvs {
+		got = append(got, kv.Key)
+	}
+	headerSorterPool.Put(hs)
+	want := []string{"Alpha", "Charlie", "Mango"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SortedKeyValuesBy(%v) key order = %v, want %v", order, got, want)
+	}
+}
+
+// TestHeaderSorterLessEquivalence checks the cached-lookup Less against a
+// reference implementation of the original per-comparison semantics across
+// adversarial order maps: duplicate values, values at or past len(order),
+// negative values, and keys that collide when lowercased.
+func TestHeaderSorterLessEquivalence(t *testing.T) {
+	referenceLess := func(kvs []HeaderKeyValues, order map[string]int, i, j int) bool {
+		idxi, iok := order[strings.ToLower(kvs[i].Key)]
+		idxj, jok := order[strings.ToLower(kvs[j].Key)]
+		if !iok && !jok {
+			return kvs[i].Key < kvs[j].Key
+		} else if !iok && jok {
+			return false
+		} else if iok && !jok {
+			return true
+		}
+		return idxi < idxj
+	}
+
+	rng := rand.New(rand.NewSource(1))
+	keyPool := []string{
+		"Accept", "accept", "ACCEPT", "User-Agent", "user-agent",
+		"Cookie", "Referer", "X-A", "x-a", "Zeta", "alpha", "Alpha",
+	}
+	for iter := 0; iter < 200; iter++ {
+		n := 2 + rng.Intn(len(keyPool)-2)
+		keys := make([]string, n)
+		perm := rng.Perm(len(keyPool))
+		for i := range keys {
+			keys[i] = keyPool[perm[i]]
+		}
+
+		order := make(map[string]int)
+		for _, k := range keys {
+			if rng.Intn(2) == 0 {
+				order[strings.ToLower(k)] = rng.Intn(n+3) - 2 // gaps, duplicates, negatives
+			}
+		}
+
+		kvs := make([]HeaderKeyValues, n)
+		for i, k := range keys {
+			kvs[i] = HeaderKeyValues{Key: k, Values: []string{"v"}}
+		}
+
+		hs := &headerSorter{kvs: kvs, order: order}
+		hs.orderIdx = make([]int, n)
+		hs.orderOK = make([]bool, n)
+		for i, kv := range kvs {
+			hs.orderIdx[i], hs.orderOK[i] = order[strings.ToLower(kv.Key)]
+		}
+
+		for i := 0; i < n; i++ {
+			for j := 0; j < n; j++ {
+				if got, want := hs.Less(i, j), referenceLess(kvs, order, i, j); got != want {
+					t.Fatalf("iter %d: Less(%q, %q) with order %v = %v, want %v",
+						iter, kvs[i].Key, kvs[j].Key, order, got, want)
+				}
+			}
 		}
 	}
 }
