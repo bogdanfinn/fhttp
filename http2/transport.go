@@ -2518,7 +2518,11 @@ func (b transportResponseBody) Close() error {
 	cs := b.cs
 	cc := cs.cc
 
-	serverSentStreamEnd := cs.bufPipe.Err() == io.EOF
+	pipeErr := cs.bufPipe.Err()
+	if pipeErr == errClosedResponseBody {
+		return nil
+	}
+	serverSentStreamEnd := pipeErr == io.EOF
 	unread := cs.bufPipe.Len()
 
 	if unread > 0 || !serverSentStreamEnd {
