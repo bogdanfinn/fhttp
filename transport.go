@@ -2891,7 +2891,7 @@ func DecompressBodyByType(body io.ReadCloser, contentType string) io.ReadCloser 
 			body: body,
 		}
 	case "deflate":
-		return identifyDeflate(body)
+		return &deflateReader{body: body}
 	case "zstd":
 		return &zstdReader{
 			body: body,
@@ -2999,35 +2999,19 @@ func (br *brReader) Close() error {
 	return br.body.Close()
 }
 
-type zlibDeflateReader struct {
-	_    incomparable
-	body io.ReadCloser
-	zr   io.ReadCloser
-	err  error
-}
-
-func (z *zlibDeflateReader) Read(p []byte) (n int, err error) {
-	if z.err != nil {
-		return 0, z.err
-	}
-	if z.zr == nil {
-		z.zr, err = zlib.NewReader(z.body)
-		if err != nil {
-			z.err = err
-			return 0, z.err
-		}
-	}
-	return z.zr.Read(p)
-}
-
-func (z *zlibDeflateReader) Close() error {
-	return z.zr.Close()
-}
-
+// deflateReader wraps a response body and decompresses it on the first Read,
+// the way gzipReader and brReader do.
+//
+// Content-Encoding: deflate is served two ways. RFC 7230 says zlib-wrapped, and
+// plenty of servers send a raw DEFLATE stream instead, so which one it is can
+// only be told from the first two bytes. Sniffing them has to wait until the
+// body is read: doing it while the response was still being built blocked the
+// round trip before its headers came back, and buffering the whole body to put
+// the sniffed bytes back made every deflate response arrive at once.
 type deflateReader struct {
 	_    incomparable
 	body io.ReadCloser
-	r    io.ReadCloser
+	r    io.Reader
 	err  error
 }
 
@@ -3036,13 +3020,47 @@ func (dr *deflateReader) Read(p []byte) (n int, err error) {
 		return 0, dr.err
 	}
 	if dr.r == nil {
-		dr.r = flate.NewReader(dr.body)
+		if err := dr.open(); err != nil {
+			dr.err = err
+			return 0, dr.err
+		}
 	}
 	return dr.r.Read(p)
 }
 
+// open reads the two header bytes and picks the decompressor for them. They are
+// handed back to the stream rather than buffered, so a large body is still read
+// as it arrives.
+func (dr *deflateReader) open() error {
+	var header [2]byte
+	n, err := io.ReadFull(dr.body, header[:])
+	if err != nil && n == 0 {
+		return err
+	}
+
+	stream := io.MultiReader(bytes.NewReader(header[:n]), dr.body)
+
+	if n == 2 && header[0] == zlibMethodDeflate &&
+		(header[1] == zlibLevelDefault || header[1] == zlibLevelLow || header[1] == zlibLevelMedium || header[1] == zlibLevelBest) {
+		zr, err := zlib.NewReader(stream)
+		if err != nil {
+			return err
+		}
+		dr.r = zr
+
+		return nil
+	}
+
+	// Anything else is read as a raw DEFLATE stream. Handing the body back
+	// undecoded was the other half of this: the two sniffed bytes had already
+	// been taken off it, so it arrived both compressed and two bytes short.
+	dr.r = flate.NewReader(stream)
+
+	return nil
+}
+
 func (dr *deflateReader) Close() error {
-	return dr.r.Close()
+	return dr.body.Close()
 }
 
 // zstdReader wraps a response body so it can lazily
@@ -3083,32 +3101,3 @@ const (
 	zlibLevelMedium   = 0x5E
 	zlibLevelBest     = 0xDA
 )
-
-func identifyDeflate(body io.ReadCloser) io.ReadCloser {
-	var header [2]byte
-	_, err := io.ReadFull(body, header[:])
-	if err != nil {
-		return body
-	}
-
-	if header[0] == zlibMethodDeflate &&
-		(header[1] == zlibLevelDefault || header[1] == zlibLevelLow || header[1] == zlibLevelMedium || header[1] == zlibLevelBest) {
-		return &zlibDeflateReader{
-			body: prependBytesToReadCloser(header[:], body),
-		}
-	} else if header[0] == zlibMethodDeflate {
-		return &deflateReader{
-			body: prependBytesToReadCloser(header[:], body),
-		}
-	}
-	return body
-}
-
-func prependBytesToReadCloser(b []byte, r io.ReadCloser) io.ReadCloser {
-	w := new(bytes.Buffer)
-	w.Write(b)
-	io.Copy(w, r)
-	defer r.Close()
-
-	return io.NopCloser(w)
-}
