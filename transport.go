@@ -3040,8 +3040,7 @@ func (dr *deflateReader) open() error {
 
 	stream := io.MultiReader(bytes.NewReader(header[:n]), dr.body)
 
-	if n == 2 && header[0] == zlibMethodDeflate &&
-		(header[1] == zlibLevelDefault || header[1] == zlibLevelLow || header[1] == zlibLevelMedium || header[1] == zlibLevelBest) {
+	if n == 2 && looksLikeZlib(header) {
 		zr, err := zlib.NewReader(stream)
 		if err != nil {
 			return err
@@ -3094,10 +3093,26 @@ func (zs *zstdReader) Close() error {
 	return zs.body.Close()
 }
 
+// RFC 1950 section 2.2. The low nibble of the first byte is the compression
+// method, its high nibble the base-2 log of the window size less eight, and the
+// two bytes read as a big-endian number are a multiple of 31.
 const (
-	zlibMethodDeflate = 0x78
-	zlibLevelDefault  = 0x9C
-	zlibLevelLow      = 0x01
-	zlibLevelMedium   = 0x5E
-	zlibLevelBest     = 0xDA
+	zlibMethodDeflate = 8
+	zlibMaxWindow     = 7
+	zlibHeaderModulus = 31
 )
+
+// looksLikeZlib reports whether these two bytes open a zlib stream.
+//
+// Testing them against the four headers a default-window compressor happens to
+// produce (0x78 with 0x01, 0x5E, 0x9C or 0xDA) covers the common cases and
+// rejects the rest, so a stream written with a smaller window - 0x68 0x05, for
+// one, which compress/zlib reads without complaint - would be taken for raw
+// deflate and decoded into nothing usable.
+func looksLikeZlib(header [2]byte) bool {
+	if header[0]&0x0f != zlibMethodDeflate || header[0]>>4 > zlibMaxWindow {
+		return false
+	}
+
+	return (uint16(header[0])<<8|uint16(header[1]))%zlibHeaderModulus == 0
+}
