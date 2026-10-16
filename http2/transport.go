@@ -1820,7 +1820,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 
 		// Does not include accept-encoding header if its defined in req.Header
 		if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
-			hdrs["accept-encoding"] = []string{"gzip, deflate, br"}
+			hdrs["accept-encoding"] = []string{"gzip, deflate, br, zstd"}
 		}
 
 		// Formats and writes headers with f function

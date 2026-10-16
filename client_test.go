@@ -1454,7 +1454,7 @@ func TestClientCopyHeadersOnRedirect(t *testing.T) {
 			"User-Agent":      []string{ua},
 			"X-Foo":           []string{xfoo},
 			"Referer":         []string{ts2URL},
-			"Accept-Encoding": []string{"gzip, deflate, br"},
+			"Accept-Encoding": []string{"gzip, deflate, br, zstd"},
 		}
 		if !reflect.DeepEqual(r.Header, want) {
 			t.Errorf("Request.Header = %#v; want %#v", r.Header, want)

@@ -24,7 +24,7 @@ var quietLog = log.New(io.Discard, "", 0)
 // adds on its own behalf. Upstream net/http sends just "gzip"; fhttp also
 // advertises deflate and brotli, so tests inherited from net/http have to
 // expect this value wherever the Transport supplied the header itself.
-const transportAcceptEncoding = "gzip, deflate, br"
+const transportAcceptEncoding = "gzip, deflate, br, zstd"
 
 // skipNeedsStdNettrace skips tests that install net's alternate resolver, or
 // that expect DNS trace hooks to fire, via internal/nettrace context keys.

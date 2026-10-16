@@ -2552,7 +2552,7 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 		req.Header.get("accept-encoding") == "" &&
 		req.Header.Get("Range") == "" &&
 		req.Method != "HEAD" {
-		// Request gzip, deflate, br if Accept-Encoding is
+		// Request gzip, deflate, br, zstd if Accept-Encoding is
 		// not specified
 		//
 		// Note that we don't request this for HEAD requests,
@@ -2564,7 +2564,7 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 		// auto-decoding a portion of a gzipped document will just fail
 		// anyway. See https://golang.org/issue/8923
 		requestedGzip = true
-		req.extraHeaders().Set("Accept-Encoding", "gzip, deflate, br")
+		req.extraHeaders().Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	}
 
 	// Set gzip to true if the caller's Accept-Encoding includes gzip.
