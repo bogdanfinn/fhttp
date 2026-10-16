@@ -2187,10 +2187,8 @@ func (pc *persistConn) readLoop() {
 
 		resp.Body = body
 
-		if rc.addedGzip && decoder(resp.Header.Get("Content-Encoding")) != nil {
+		if rc.addedGzip {
 			resp.Body = DecompressBody(resp)
-			resp.Header.Del("Content-Encoding")
-			resp.Header.Del("Content-Length")
 		}
 
 		select {
@@ -2869,14 +2867,16 @@ func (cl *connLRU) len() int {
 	return len(cl.m)
 }
 
-// DecompressBody returns the body of res decoded by its Content-Encoding, marking res as uncompressed,
-// or the body itself if the encoding is not one fhttp decodes.
+// DecompressBody returns the body of res decoded by its Content-Encoding, marking res as uncompressed
+// and removing its Content-Encoding and Content-Length, or the body itself if the encoding is not one fhttp decodes.
 func DecompressBody(res *Response) io.ReadCloser {
 	decode := decoder(res.Header.Get("Content-Encoding"))
 	if decode == nil {
 		return res.Body
 	}
 
+	res.Header.Del("Content-Encoding")
+	res.Header.Del("Content-Length")
 	res.ContentLength = -1
 	res.Uncompressed = true
 
