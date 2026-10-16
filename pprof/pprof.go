@@ -10,15 +10,16 @@
 // The handled paths all begin with /debug/pprof/.
 //
 // To use pprof, link this package into your program:
+//
 //	import _ "net/http/pprof"
 //
 // If your application is not already running an http server, you
 // need to start one. Add "net/http" and "log" to your imports and
 // the following code to your main function:
 //
-// 	go func() {
-// 		log.Println(http.ListenAndServe("localhost:6060", nil))
-// 	}()
+//	go func() {
+//		log.Println(http.ListenAndServe("localhost:6060", nil))
+//	}()
 //
 // If you are not using DefaultServeMux, you will have to register handlers
 // with the mux you are using.
@@ -53,7 +54,6 @@
 // For a study of the facility in action, visit
 //
 //	https://blog.golang.org/2011/06/profiling-go-programs.html
-//
 package pprof
 
 import (
@@ -343,15 +343,16 @@ var profileSupportsDelta = map[handler]bool{
 }
 
 var profileDescriptions = map[string]string{
-	"allocs":       "A sampling of all past memory allocations",
-	"block":        "Stack traces that led to blocking on synchronization primitives",
-	"cmdline":      "The command line invocation of the current program",
-	"goroutine":    "Stack traces of all current goroutines",
-	"heap":         "A sampling of memory allocations of live objects. You can specify the gc GET parameter to run GC before taking the heap sample.",
-	"mutex":        "Stack traces of holders of contended mutexes",
-	"profile":      "CPU profile. You can specify the duration in the seconds GET parameter. After you get the profile file, use the go tool pprof command to investigate the profile.",
-	"threadcreate": "Stack traces that led to the creation of new OS threads",
-	"trace":        "A trace of execution of the current program. You can specify the duration in the seconds GET parameter. After you get the trace file, use the go tool trace command to investigate the trace.",
+	"allocs":        "A sampling of all past memory allocations",
+	"block":         "Stack traces that led to blocking on synchronization primitives",
+	"cmdline":       "The command line invocation of the current program",
+	"goroutine":     "Stack traces of all current goroutines",
+	"goroutineleak": "Stack traces of all leaked goroutines. Use debug=2 as a query parameter to export in the same format as an unrecovered panic.",
+	"heap":          "A sampling of memory allocations of live objects. You can specify the gc GET parameter to run GC before taking the heap sample.",
+	"mutex":         "Stack traces of holders of contended mutexes",
+	"profile":       "CPU profile. You can specify the duration in the seconds GET parameter. After you get the profile file, use the go tool pprof command to investigate the profile.",
+	"threadcreate":  "Stack traces that led to the creation of new OS threads",
+	"trace":         "A trace of execution of the current program. You can specify the duration in the seconds GET parameter. After you get the trace file, use the go tool trace command to investigate the trace.",
 }
 
 type profileEntry struct {
