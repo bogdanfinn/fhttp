@@ -272,8 +272,10 @@ func (t *transferWriter) shouldSendContentLength() bool {
 	return false
 }
 
-// addHeaders adds transfer headers to an existing header object, replacing any the caller set with the same name
+// addHeaders adds transfer headers to an existing header object, replacing any the caller set with the same name.
+// Content-Length always comes from the request, as in net/http.
 func (t *transferWriter) addHeaders(hdrs *Header) error {
+	deleteHeaderFold(*hdrs, "Content-Length")
 	if t.Close && !hasToken(t.Header.get("Connection"), "close") {
 		hdrs.Add("Connection", "close")
 	}
@@ -311,12 +313,17 @@ func (t *transferWriter) addHeaders(hdrs *Header) error {
 
 // setTransferHeader sets key to value in h, removing the caller's value under any case of key.
 func setTransferHeader(h Header, key, value string) {
+	deleteHeaderFold(h, key)
+	h.Set(key, value)
+}
+
+// deleteHeaderFold deletes key from h under any case.
+func deleteHeaderFold(h Header, key string) {
 	for k := range h {
 		if strings.EqualFold(k, key) {
 			delete(h, k)
 		}
 	}
-	h.Set(key, value)
 }
 
 func (t *transferWriter) writeHeader(w io.Writer, trace *httptrace.ClientTrace) error {

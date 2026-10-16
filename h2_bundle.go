@@ -8652,7 +8652,13 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 	if hdrs == nil {
 		hdrs = make(Header)
 	}
-	if _, ok := req.Header["content-length"]; !ok && http2shouldSendReqContentLength(req.Method, contentLength) {
+	// Content-Length comes from the request, not from the caller's header map, as in net/http.
+	for k := range hdrs {
+		if strings.EqualFold(k, "content-length") {
+			delete(hdrs, k)
+		}
+	}
+	if http2shouldSendReqContentLength(req.Method, contentLength) {
 		hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
 	}
 
