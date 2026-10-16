@@ -2187,12 +2187,10 @@ func (pc *persistConn) readLoop() {
 
 		resp.Body = body
 
-		if rc.addedGzip {
+		if rc.addedGzip && decoder(resp.Header.Get("Content-Encoding")) != nil {
 			resp.Body = DecompressBody(resp)
 			resp.Header.Del("Content-Encoding")
 			resp.Header.Del("Content-Length")
-			resp.ContentLength = -1
-			resp.Uncompressed = true
 		}
 
 		select {
@@ -2871,33 +2869,40 @@ func (cl *connLRU) len() int {
 	return len(cl.m)
 }
 
+// DecompressBody returns the body of res decoded by its Content-Encoding, marking res as uncompressed,
+// or the body itself if the encoding is not one fhttp decodes.
 func DecompressBody(res *Response) io.ReadCloser {
-	ce := res.Header.Get("Content-Encoding")
+	decode := decoder(res.Header.Get("Content-Encoding"))
+	if decode == nil {
+		return res.Body
+	}
 
 	res.ContentLength = -1
 	res.Uncompressed = true
 
-	return DecompressBodyByType(res.Body, ce)
+	return decode(res.Body)
 }
 
 func DecompressBodyByType(body io.ReadCloser, contentType string) io.ReadCloser {
-	switch contentType {
+	if decode := decoder(contentType); decode != nil {
+		return decode(body)
+	}
+	return body
+}
+
+// decoder returns what decodes a body in encoding, which is case-insensitive, or nil if fhttp does not decode it.
+func decoder(encoding string) func(body io.ReadCloser) io.ReadCloser {
+	switch strings.ToLower(encoding) {
 	case "gzip":
-		return &gzipReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &gzipReader{body: body} }
 	case "br":
-		return &brReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &brReader{body: body} }
 	case "deflate":
-		return &deflateReader{body: body}
+		return func(body io.ReadCloser) io.ReadCloser { return &deflateReader{body: body} }
 	case "zstd":
-		return &zstdReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &zstdReader{body: body} }
 	default:
-		return body
+		return nil
 	}
 }
 
