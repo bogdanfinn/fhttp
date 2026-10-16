@@ -658,12 +658,17 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 	if err != nil {
 		return err
 	}
-	err = tw.addHeaders(&r.Header, trace)
+	// The transfer headers are added to a copy, so they follow the header order without changing r.Header.
+	header := r.Header.Clone()
+	if header == nil {
+		header = make(Header)
+	}
+	err = tw.addHeaders(&header)
 	if err != nil {
 		return err
 	}
 
-	err = r.Header.writeSubset(w, exclude, trace)
+	err = header.writeSubset(w, exclude, trace)
 	if err != nil {
 		return err
 	}
