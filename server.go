@@ -1127,7 +1127,7 @@ func relevantCaller() runtime.Frame {
 	var frame runtime.Frame
 	for {
 		frame, more := frames.Next()
-		if !strings.HasPrefix(frame.Function, "net/http.") {
+		if !strings.HasPrefix(frame.Function, "github.com/bogdanfinn/fhttp.") {
 			return frame
 		}
 		if !more {
