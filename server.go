@@ -1120,7 +1120,9 @@ func checkWriteHeaderCode(code int) {
 }
 
 // funcPrefix starts the names of this package's functions in stack frames, whatever path the package is imported by.
-var funcPrefix = reflect.TypeOf(Header(nil)).PkgPath() + "."
+var funcPrefix = sync.OnceValue(func() string {
+	return reflect.TypeFor[Header]().PkgPath() + "."
+})
 
 // relevantCaller searches the call stack for the first function outside of this package.
 // The purpose of this function is to provide more helpful error messages.
@@ -1131,7 +1133,7 @@ func relevantCaller() runtime.Frame {
 	var frame runtime.Frame
 	for {
 		frame, more := frames.Next()
-		if !strings.HasPrefix(frame.Function, funcPrefix) {
+		if !strings.HasPrefix(frame.Function, funcPrefix()) {
 			return frame
 		}
 		if !more {
