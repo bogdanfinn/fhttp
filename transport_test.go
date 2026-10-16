@@ -6460,10 +6460,11 @@ func TestErrorWriteLoopRace(t *testing.T) {
 // Test that a new request which uses the connection of an active request
 // cannot cause it to be canceled as well.
 func TestCancelRequestWhenSharingConnection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
+	reqc := make(chan chan struct{}, 2)
 	ts := httptest.NewServer(HandlerFunc(func(w ResponseWriter, req *Request) {
+		ch := make(chan struct{}, 1)
+		reqc <- ch
+		<-ch
 		w.Header().Add("Content-Length", "0")
 	}))
 	defer ts.Close()
@@ -6475,34 +6476,69 @@ func TestCancelRequestWhenSharingConnection(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for ctx.Err() == nil {
-				reqctx, reqcancel := context.WithCancel(ctx)
-				go reqcancel()
-				req, _ := NewRequestWithContext(reqctx, "GET", ts.URL, nil)
-				res, err := client.Do(req)
-				if err == nil {
-					res.Body.Close()
-				}
-			}
-		}()
-	}
-
-	for ctx.Err() == nil {
-		req, _ := NewRequest("GET", ts.URL, nil)
-		if res, err := client.Do(req); err != nil {
-			t.Errorf("unexpected: %p %v", req, err)
-			break
+	wg.Add(1)
+	putidlec := make(chan chan struct{}, 1)
+	reqerrc := make(chan error, 1)
+	go func() {
+		defer wg.Done()
+		ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+			PutIdleConn: func(error) {
+				// Signal that the idle conn has been returned to the pool,
+				// and wait for the order to proceed.
+				ch := make(chan struct{})
+				putidlec <- ch
+				close(putidlec) // panic if PutIdleConn runs twice for some reason
+				<-ch
+			},
+		})
+		req, _ := NewRequestWithContext(ctx, "GET", ts.URL, nil)
+		res, err := client.Do(req)
+		if err != nil {
+			reqerrc <- err
 		} else {
 			res.Body.Close()
 		}
+	}()
+
+	// Wait for the first request to receive a response and return the
+	// connection to the idle pool.
+	select {
+	case err := <-reqerrc:
+		t.Fatalf("request 1: got err %v, want nil", err)
+	case r1c := <-reqc:
+		close(r1c)
+	}
+	var idlec chan struct{}
+	select {
+	case err := <-reqerrc:
+		t.Fatalf("request 1: got err %v, want nil", err)
+	case idlec = <-putidlec:
 	}
 
+	wg.Add(1)
+	cancelctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer wg.Done()
+		req, _ := NewRequestWithContext(cancelctx, "GET", ts.URL, nil)
+		res, err := client.Do(req)
+		if err == nil {
+			res.Body.Close()
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("request 2: got err %v, want Canceled", err)
+		}
+
+		// Unblock the first request.
+		close(idlec)
+	}()
+
+	// Wait for the second request to arrive at the server, and then cancel
+	// the request context.
+	r2c := <-reqc
 	cancel()
+
+	<-idlec
+
+	close(r2c)
 	wg.Wait()
 }
