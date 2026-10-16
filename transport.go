@@ -2928,13 +2928,21 @@ var gzipReaderPool sync.Pool
 // gzipReader wraps a response body so it can lazily
 // call gzip.NewReader on the first call to Read
 type gzipReader struct {
-	_    incomparable
-	body io.ReadCloser // underlying Response.Body
-	zr   *gzip.Reader  // lazily-initialized gzip reader
-	zerr error         // sticky error
+	_      incomparable
+	body   io.ReadCloser // underlying Response.Body
+	zr     *gzip.Reader  // lazily-initialized gzip reader
+	zerr   error         // sticky error
+	mu     sync.Mutex    // guards closed
+	closed bool          // whether Close was called
 }
 
 func (gz *gzipReader) Read(p []byte) (n int, err error) {
+	gz.mu.Lock()
+	closed := gz.closed
+	gz.mu.Unlock()
+	if closed {
+		return 0, errReadOnClosedResBody
+	}
 	if gz.zerr != nil {
 		return 0, gz.zerr
 	}
@@ -2977,6 +2985,9 @@ func (gz *gzipReader) Read(p []byte) (n int, err error) {
 }
 
 func (gz *gzipReader) Close() error {
+	gz.mu.Lock()
+	gz.closed = true
+	gz.mu.Unlock()
 	return gz.body.Close()
 }
 
