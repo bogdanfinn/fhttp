@@ -5913,8 +5913,10 @@ func TestTransportClone(t *testing.T) {
 		TLSNextProto: map[string]func(authority string, c *tls.Conn) RoundTripper{
 			"foo": func(authority string, c *tls.Conn) RoundTripper { panic("") },
 		},
-		ReadBufferSize:  1,
-		WriteBufferSize: 1,
+		ReadBufferSize:    1,
+		WriteBufferSize:   1,
+		PseudoHeaderOrder: []string{":method"},
+		ConnectionFlow:    1,
 	}
 	tr2 := tr.Clone()
 	rv := reflect.ValueOf(tr2).Elem()
@@ -5922,6 +5924,10 @@ func TestTransportClone(t *testing.T) {
 	for i := 0; i < rt.NumField(); i++ {
 		sf := rt.Field(i)
 		if !token.IsExported(sf.Name) {
+			continue
+		}
+		// H2transport belongs to the transport that set it up, so a clone sets up its own.
+		if sf.Name == "H2transport" {
 			continue
 		}
 		if rv.Field(i).IsZero() {

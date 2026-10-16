@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -337,6 +338,8 @@ func (t *Transport) Clone() *Transport {
 		ForceAttemptHTTP2:      t.ForceAttemptHTTP2,
 		WriteBufferSize:        t.WriteBufferSize,
 		ReadBufferSize:         t.ReadBufferSize,
+		PseudoHeaderOrder:      slices.Clone(t.PseudoHeaderOrder),
+		ConnectionFlow:         t.ConnectionFlow,
 	}
 	if t.TLSClientConfig != nil {
 		t2.TLSClientConfig = t.TLSClientConfig.Clone()
