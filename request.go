@@ -652,6 +652,13 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 		if hasLow && emptyHeaderValue(uaLow) {
 			exclude["user-agent"] = true
 		}
+		// Only the first User-Agent goes out, as over HTTP/2.
+		if len(uaCap) > 1 {
+			header["User-Agent"] = uaCap[:1]
+		}
+		if len(uaLow) > 1 {
+			header["user-agent"] = uaLow[:1]
+		}
 	}
 
 	// Process Body,ContentLength,Close,Trailer
