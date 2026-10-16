@@ -328,8 +328,8 @@ func TestCompressionBrotli(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if h := resp.Header.Get("content-encoding"); h == "" || h != "br" {
-		t.Fatalf("Got content-encoding header %v, expected br", h)
+	if !resp.Uncompressed {
+		t.Fatal("brotli body was not decoded")
 	}
 }
 
