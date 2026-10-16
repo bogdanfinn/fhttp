@@ -1172,8 +1172,10 @@ func TestServer_MaxQueuedControlFrames(t *testing.T) {
 	st := newServerTester(t, nil)
 	defer st.Close()
 	st.greet()
+	// Logging the writes decodes each written frame again, which is most of the time spent sending this many.
+	st.fr.logWrites = false
 
-	const extraPings = 500000 // enough to fill the TCP buffers
+	const extraPings = 4000000 // enough to fill the TCP buffers, which the OS can size to several megabytes
 
 	for i := 0; i < maxQueuedControlFrames+extraPings; i++ {
 		pingData := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
