@@ -21,6 +21,7 @@ import (
 	urlpkg "net/url"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -1118,7 +1119,10 @@ func checkWriteHeaderCode(code int) {
 	}
 }
 
-// relevantCaller searches the call stack for the first function outside of net/http.
+// funcPrefix starts the names of this package's functions in stack frames, whatever path the package is imported by.
+var funcPrefix = reflect.TypeOf(Header(nil)).PkgPath() + "."
+
+// relevantCaller searches the call stack for the first function outside of this package.
 // The purpose of this function is to provide more helpful error messages.
 func relevantCaller() runtime.Frame {
 	pc := make([]uintptr, 16)
@@ -1127,7 +1131,7 @@ func relevantCaller() runtime.Frame {
 	var frame runtime.Frame
 	for {
 		frame, more := frames.Next()
-		if !strings.HasPrefix(frame.Function, "github.com/bogdanfinn/fhttp.") {
+		if !strings.HasPrefix(frame.Function, funcPrefix) {
 			return frame
 		}
 		if !more {
