@@ -272,7 +272,7 @@ func (t *transferWriter) shouldSendContentLength() bool {
 	return false
 }
 
-// addHeaders adds transfer headers to an existing header object
+// addHeaders adds transfer headers to an existing header object, replacing any the caller set with the same name
 func (t *transferWriter) addHeaders(hdrs *Header) error {
 	if t.Close && !hasToken(t.Header.get("Connection"), "close") {
 		hdrs.Add("Connection", "close")
@@ -282,9 +282,9 @@ func (t *transferWriter) addHeaders(hdrs *Header) error {
 	// function of the sanitized field triple (Body, ContentLength,
 	// TransferEncoding)
 	if t.shouldSendContentLength() {
-		hdrs.Add("Content-Length", strconv.FormatInt(t.ContentLength, 10))
+		setTransferHeader(*hdrs, "Content-Length", strconv.FormatInt(t.ContentLength, 10))
 	} else if chunked(t.TransferEncoding) {
-		hdrs.Add("Transfer-Encoding", "chunked")
+		setTransferHeader(*hdrs, "Transfer-Encoding", "chunked")
 	}
 
 	// Write Trailer header
@@ -302,11 +302,21 @@ func (t *transferWriter) addHeaders(hdrs *Header) error {
 			sort.Strings(keys)
 			// TODO: could do better allocation-wise here, but trailers are rare,
 			// so being lazy for now.
-			hdrs.Add("Trailer", strings.Join(keys, ","))
+			setTransferHeader(*hdrs, "Trailer", strings.Join(keys, ","))
 		}
 	}
 
 	return nil
+}
+
+// setTransferHeader sets key to value in h, removing the caller's value under any case of key.
+func setTransferHeader(h Header, key, value string) {
+	for k := range h {
+		if strings.EqualFold(k, key) {
+			delete(h, k)
+		}
+	}
+	h.Set(key, value)
 }
 
 func (t *transferWriter) writeHeader(w io.Writer, trace *httptrace.ClientTrace) error {
