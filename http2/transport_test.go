@@ -4840,7 +4840,7 @@ func TestClientConnEncodeHeadersOrder(t *testing.T) {
 			want: []string{
 				":authority: www.example.org", ":method: GET", ":path: /p", ":scheme: https",
 				"a-one: 1", "b-two: 2",
-				"accept-encoding: gzip, deflate, br",
+				"accept-encoding: gzip, deflate, br, zstd",
 				"user-agent: " + defaultUserAgent,
 			},
 		},
@@ -4855,7 +4855,7 @@ func TestClientConnEncodeHeadersOrder(t *testing.T) {
 			want: []string{
 				":method: GET", ":authority: www.example.org", ":scheme: https", ":path: /p",
 				"alpha: a", "mid: m1", "mid: m2", "zeta: z",
-				"accept-encoding: gzip, deflate, br",
+				"accept-encoding: gzip, deflate, br, zstd",
 				"user-agent: " + defaultUserAgent,
 			},
 		},

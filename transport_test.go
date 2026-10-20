@@ -3466,7 +3466,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("GET", "http://fake.golang", nil)
 			},
-			reqString: `GET / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\n`,
+			reqString: `GET / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br, zstd\r\n\r\n`,
 		},
 		{
 			name: "IdempotentGetBodySomeWritten",
@@ -3478,7 +3478,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("GET", "http://fake.golang", strings.NewReader("foo\n"))
 			},
-			reqString: `GET / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\nfoo\n`,
+			reqString: `GET / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br, zstd\r\n\r\nfoo\n`,
 		},
 		{
 			name: "NothingWrittenNoBody",
@@ -3489,7 +3489,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("DELETE", "http://fake.golang", nil)
 			},
-			reqString: `DELETE / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\n`,
+			reqString: `DELETE / HTTP/1.1\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br, zstd\r\n\r\n`,
 		},
 		{
 			name: "NothingWrittenGetBody",
@@ -3502,7 +3502,7 @@ func TestRetryRequestsOnError(t *testing.T) {
 			req: func() *Request {
 				return newRequest("POST", "http://fake.golang", strings.NewReader("foo\n"))
 			},
-			reqString: `POST / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br\r\n\r\nfoo\n`,
+			reqString: `POST / HTTP/1.1\r\nContent-Length: 4\r\nHost: fake.golang\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate, br, zstd\r\n\r\nfoo\n`,
 		},
 	}
 

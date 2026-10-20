@@ -8664,7 +8664,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 
 	// Does not include accept-encoding header if its defined in req.Header
 	if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
-		hdrs["accept-encoding"] = []string{"gzip, deflate, br"}
+		hdrs["accept-encoding"] = []string{"gzip, deflate, br, zstd"}
 	}
 
 	var kvs []HeaderKeyValues
