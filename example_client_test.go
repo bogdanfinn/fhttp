@@ -328,7 +328,12 @@ func TestCompressionBrotli(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if h := resp.Header.Get("content-encoding"); h == "" || h != "br" {
+	// HTTP/2 decodes the body even though the caller set Accept-Encoding, HTTP/1.1 only when it set it itself.
+	if resp.ProtoMajor == 2 {
+		if !resp.Uncompressed {
+			t.Fatal("brotli body was not decoded")
+		}
+	} else if h := resp.Header.Get("content-encoding"); h != "br" {
 		t.Fatalf("Got content-encoding header %v, expected br", h)
 	}
 }
@@ -478,6 +483,10 @@ func TestDeflateResponseReturnsBeforeItsBody(t *testing.T) {
 		t.Fatal("the response did not come back while the body was still being held")
 	}
 	defer resp.Body.Close()
+	// Only HTTP/2 decodes a body whose encoding the caller asked for itself.
+	if resp.ProtoMajor != 2 {
+		t.Skip("HTTP/2 is not in use")
+	}
 
 	// The control: the body really was still held, so returning proves the
 	// round trip did not wait for it.

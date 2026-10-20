@@ -621,16 +621,17 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 		return err
 	}
 
-	// Host and User-Agent are written through the header map (so that they
-	// participate in the configured header order), which means the map has
-	// to exist: a zero-value Request has a nil Header.
-	if r.Header == nil {
-		r.Header = make(Header)
+	// Host, User-Agent and the transfer headers are written through a copy of
+	// the header map, so that they participate in the configured header order
+	// without changing r.Header.
+	header := r.Header.Clone()
+	if header == nil {
+		header = make(Header)
 	}
 
-	if _, ok := r.Header["Host"]; !ok {
-		if _, ok := r.Header["host"]; !ok {
-			r.Header.Set("Host", host)
+	if _, ok := header["Host"]; !ok {
+		if _, ok := header["host"]; !ok {
+			header.Set("Host", host)
 		}
 	}
 
@@ -638,11 +639,11 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 	// empty string means none, as in net/http and as the HTTP/2 path here
 	// already does; it used to go out as an empty "User-Agent:" line.
 	var exclude map[string]bool
-	uaCap, hasCap := r.Header["User-Agent"]
-	uaLow, hasLow := r.Header["user-agent"]
+	uaCap, hasCap := header["User-Agent"]
+	uaLow, hasLow := header["user-agent"]
 	switch {
 	case !hasCap && !hasLow:
-		r.Header.Set("User-Agent", "Go-http-client/1.1")
+		header.Set("User-Agent", "Go-http-client/1.1")
 	default:
 		exclude = make(map[string]bool, 2)
 		if hasCap && emptyHeaderValue(uaCap) {
@@ -651,6 +652,13 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 		if hasLow && emptyHeaderValue(uaLow) {
 			exclude["user-agent"] = true
 		}
+		// Only the first User-Agent goes out, as over HTTP/2.
+		if len(uaCap) > 1 {
+			header["User-Agent"] = uaCap[:1]
+		}
+		if len(uaLow) > 1 {
+			header["user-agent"] = uaLow[:1]
+		}
 	}
 
 	// Process Body,ContentLength,Close,Trailer
@@ -658,12 +666,12 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 	if err != nil {
 		return err
 	}
-	err = tw.addHeaders(&r.Header, trace)
+	err = tw.addHeaders(&header)
 	if err != nil {
 		return err
 	}
 
-	err = r.Header.writeSubset(w, exclude, trace)
+	err = header.writeSubset(w, exclude, trace)
 	if err != nil {
 		return err
 	}

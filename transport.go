@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -337,6 +338,8 @@ func (t *Transport) Clone() *Transport {
 		ForceAttemptHTTP2:      t.ForceAttemptHTTP2,
 		WriteBufferSize:        t.WriteBufferSize,
 		ReadBufferSize:         t.ReadBufferSize,
+		PseudoHeaderOrder:      slices.Clone(t.PseudoHeaderOrder),
+		ConnectionFlow:         t.ConnectionFlow,
 	}
 	if t.TLSClientConfig != nil {
 		t2.TLSClientConfig = t.TLSClientConfig.Clone()
@@ -2189,10 +2192,6 @@ func (pc *persistConn) readLoop() {
 
 		if rc.addedGzip {
 			resp.Body = DecompressBody(resp)
-			resp.Header.Del("Content-Encoding")
-			resp.Header.Del("Content-Length")
-			resp.ContentLength = -1
-			resp.Uncompressed = true
 		}
 
 		select {
@@ -2871,33 +2870,42 @@ func (cl *connLRU) len() int {
 	return len(cl.m)
 }
 
+// DecompressBody returns the body of res decoded by its Content-Encoding, marking res as uncompressed
+// and removing its Content-Encoding and Content-Length, or the body itself if the encoding is not one fhttp decodes.
 func DecompressBody(res *Response) io.ReadCloser {
-	ce := res.Header.Get("Content-Encoding")
+	decode := decoder(res.Header.Get("Content-Encoding"))
+	if decode == nil {
+		return res.Body
+	}
 
+	res.Header.Del("Content-Encoding")
+	res.Header.Del("Content-Length")
 	res.ContentLength = -1
 	res.Uncompressed = true
 
-	return DecompressBodyByType(res.Body, ce)
+	return decode(res.Body)
 }
 
 func DecompressBodyByType(body io.ReadCloser, contentType string) io.ReadCloser {
-	switch contentType {
+	if decode := decoder(contentType); decode != nil {
+		return decode(body)
+	}
+	return body
+}
+
+// decoder returns what decodes a body in encoding, which is case-insensitive, or nil if fhttp does not decode it.
+func decoder(encoding string) func(body io.ReadCloser) io.ReadCloser {
+	switch strings.ToLower(encoding) {
 	case "gzip":
-		return &gzipReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &gzipReader{body: body} }
 	case "br":
-		return &brReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &brReader{body: body} }
 	case "deflate":
-		return &deflateReader{body: body}
+		return func(body io.ReadCloser) io.ReadCloser { return &deflateReader{body: body} }
 	case "zstd":
-		return &zstdReader{
-			body: body,
-		}
+		return func(body io.ReadCloser) io.ReadCloser { return &zstdReader{body: body} }
 	default:
-		return body
+		return nil
 	}
 }
 
@@ -2923,13 +2931,21 @@ var gzipReaderPool sync.Pool
 // gzipReader wraps a response body so it can lazily
 // call gzip.NewReader on the first call to Read
 type gzipReader struct {
-	_    incomparable
-	body io.ReadCloser // underlying Response.Body
-	zr   *gzip.Reader  // lazily-initialized gzip reader
-	zerr error         // sticky error
+	_      incomparable
+	body   io.ReadCloser // underlying Response.Body
+	zr     *gzip.Reader  // lazily-initialized gzip reader
+	zerr   error         // sticky error
+	mu     sync.Mutex    // guards closed
+	closed bool          // whether Close was called
 }
 
 func (gz *gzipReader) Read(p []byte) (n int, err error) {
+	gz.mu.Lock()
+	closed := gz.closed
+	gz.mu.Unlock()
+	if closed {
+		return 0, errReadOnClosedResBody
+	}
 	if gz.zerr != nil {
 		return 0, gz.zerr
 	}
@@ -2972,6 +2988,9 @@ func (gz *gzipReader) Read(p []byte) (n int, err error) {
 }
 
 func (gz *gzipReader) Close() error {
+	gz.mu.Lock()
+	gz.closed = true
+	gz.mu.Unlock()
 	return gz.body.Close()
 }
 
