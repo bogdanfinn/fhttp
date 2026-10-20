@@ -3081,6 +3081,10 @@ func (dr *deflateReader) Close() error {
 	return dr.body.Close()
 }
 
+// zstdMaxWindowSize is the largest window a zstd content coding may use, per RFC 9659 section 3.
+// Without the limit a server could make the decoder allocate up to its default of 512MB.
+const zstdMaxWindowSize = 8 << 20
+
 // zstdReader wraps a response body so it can lazily
 // call zstd.NewReader on the first call to Read
 type zstdReader struct {
@@ -3094,7 +3098,8 @@ func (zs *zstdReader) Read(p []byte) (n int, err error) {
 		return 0, zs.zerr
 	}
 	if zs.zr == nil {
-		zs.zr, err = zstd.NewReader(zs.body)
+		// A single decoder goroutine suffices for one response body and keeps the per-response cost low.
+		zs.zr, err = zstd.NewReader(zs.body, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(zstdMaxWindowSize))
 		if err != nil {
 			zs.zerr = err
 			return 0, err
