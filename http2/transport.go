@@ -339,6 +339,7 @@ type ClientConn struct {
 
 	mu                    sync.Mutex // guards following
 	nextStreamID          uint32
+	firstStreamID         uint32 // nextStreamID before any request: 1 unless InitialStreamID, AllowHTTP or Priorities moved it
 	peerMaxHeaderListSize uint64
 	pendingRequests       int                       // requests blocked and waiting to be sent because len(streams) == maxConcurrentStreams
 	pings                 map[[8]byte]chan struct{} // in flight ping data to notification channel
@@ -886,6 +887,11 @@ func (t *Transport) newClientConn(c net.Conn, addr string, singleUse bool) (*Cli
 		cc.nextStreamID = priority.StreamID + 2
 	}
 
+	// The first stream is not always 1, so remember where this connection
+	// starts. idleStateLocked uses it to tell an unused connection from a
+	// used one.
+	cc.firstStreamID = cc.nextStreamID
+
 	// Use the dynamic connection flow value we calculated earlier
 	cc.inflow.add(int32(cc.connFlow) + int32(initialWindowSize))
 
@@ -964,7 +970,7 @@ func (cc *ClientConn) idleState() clientConnIdleState {
 }
 
 func (cc *ClientConn) idleStateLocked() (st clientConnIdleState) {
-	if cc.singleUse && cc.nextStreamID > 1 {
+	if cc.singleUse && cc.nextStreamID > cc.firstStreamID {
 		return
 	}
 	var maxConcurrentOkay bool
@@ -981,7 +987,7 @@ func (cc *ClientConn) idleStateLocked() (st clientConnIdleState) {
 	st.canTakeNewRequest = cc.goAway == nil && !cc.closed && !cc.closing && maxConcurrentOkay &&
 		int64(cc.nextStreamID)+2*int64(cc.pendingRequests) < math.MaxInt32 &&
 		!cc.tooIdleLocked()
-	st.freshConn = cc.nextStreamID == 1 && st.canTakeNewRequest
+	st.freshConn = cc.nextStreamID == cc.firstStreamID && st.canTakeNewRequest
 
 	return
 }
