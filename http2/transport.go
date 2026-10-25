@@ -174,6 +174,14 @@ func (t *Transport) GetT1() *http.Transport {
 	return t.t1
 }
 
+// SetT1 sets the HTTP/1 Transport whose settings, such as
+// ResponseHeaderTimeout and DisableKeepAlives, this transport uses.
+// Unlike ConfigureTransports, it does not modify t1.
+// It must be called before the transport is first used.
+func (t *Transport) SetT1(t1 *http.Transport) {
+	t.t1 = t1
+}
+
 func (t *Transport) maxHeaderListSize() uint32 {
 	maxHeaderListSize, ok := t.Settings[SettingMaxHeaderListSize]
 

@@ -2069,9 +2069,9 @@ func TestTransportResponseHeaderTimeout_Body(t *testing.T) {
 
 func testTransportResponseHeaderTimeout(t *testing.T, body bool) {
 	ct := newClientTester(t)
-	ct.tr.t1 = &http.Transport{
+	ct.tr.SetT1(&http.Transport{
 		ResponseHeaderTimeout: 5 * time.Millisecond,
-	}
+	})
 	ct.client = func() error {
 		c := &http.Client{Transport: ct.tr}
 		var err error
