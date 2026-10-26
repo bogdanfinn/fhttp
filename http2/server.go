@@ -1993,6 +1993,11 @@ func (sc *serverConn) newWriterAndRequest(st *stream, f *MetaHeadersFrame) (*res
 		protocol:  f.PseudoValue("protocol"),
 	}
 
+	// extended connect is disabled, so we should not see :protocol
+	if disableExtendedConnectProtocol && rp.protocol != "" {
+		return nil, nil, streamError(f.StreamID, ErrCodeProtocol)
+	}
+
 	isConnect := rp.method == "CONNECT"
 	if isConnect {
 		if rp.protocol == "" && (rp.path != "" || rp.scheme != "" || rp.authority == "") {
