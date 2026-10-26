@@ -275,6 +275,8 @@ func (t *transferWriter) shouldSendContentLength() bool {
 // addHeaders adds transfer headers to an existing header object, replacing any the caller set with the same name.
 // Content-Length always comes from the request, as in net/http.
 func (t *transferWriter) addHeaders(hdrs *Header) error {
+	// Not setTransferHeader: the caller's Content-Length goes even when none is sent.
+	contentLength := headerNameFold(*hdrs, "Content-Length")
 	deleteHeaderFold(*hdrs, "Content-Length")
 	if t.Close && !hasToken(t.Header.get("Connection"), "close") {
 		hdrs.Add("Connection", "close")
@@ -284,7 +286,7 @@ func (t *transferWriter) addHeaders(hdrs *Header) error {
 	// function of the sanitized field triple (Body, ContentLength,
 	// TransferEncoding)
 	if t.shouldSendContentLength() {
-		setTransferHeader(*hdrs, "Content-Length", strconv.FormatInt(t.ContentLength, 10))
+		(*hdrs)[contentLength] = []string{strconv.FormatInt(t.ContentLength, 10)}
 	} else if chunked(t.TransferEncoding) {
 		setTransferHeader(*hdrs, "Transfer-Encoding", "chunked")
 	}
@@ -311,10 +313,30 @@ func (t *transferWriter) addHeaders(hdrs *Header) error {
 	return nil
 }
 
-// setTransferHeader sets key to value in h, removing the caller's value under any case of key.
+// setTransferHeader sets key to value in h, replacing the caller's value under
+// any case of key but keeping the name the caller wrote.
 func setTransferHeader(h Header, key, value string) {
+	name := headerNameFold(h, key)
 	deleteHeaderFold(h, key)
-	h.Set(key, value)
+	h[name] = []string{value}
+}
+
+// headerNameFold returns the name under which h has key, if h has it under
+// exactly one case, and otherwise the canonical form of key.
+func headerNameFold(h Header, key string) string {
+	name := ""
+	for k := range h {
+		if strings.EqualFold(k, key) {
+			if name != "" {
+				return CanonicalHeaderKey(key)
+			}
+			name = k
+		}
+	}
+	if name == "" {
+		return CanonicalHeaderKey(key)
+	}
+	return name
 }
 
 // deleteHeaderFold deletes key from h under any case.
