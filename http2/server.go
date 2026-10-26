@@ -1541,6 +1541,7 @@ func (sc *serverConn) closeStream(st *stream, err error) {
 
 		p.CloseWithError(err)
 	}
+	st.cancelCtx()
 	st.cw.Close() // signals Handler's CloseNotifier, unblocks writes, etc
 	sc.writeSched.CloseStream(st.id)
 }
