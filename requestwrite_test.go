@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -978,3 +979,49 @@ func (c *dumpConn) RemoteAddr() net.Addr               { return nil }
 func (c *dumpConn) SetDeadline(t time.Time) error      { return nil }
 func (c *dumpConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *dumpConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// The transfer headers take their values from the request but keep the name
+// the caller wrote.
+func TestRequestWriteKeepsTransferHeaderNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		method  string
+		body    io.Reader
+		length  int64
+		header  Header
+		trailer Header
+		want    []string // transfer header lines, in order
+	}{
+		{"lowercase", "POST", strings.NewReader("abc"), 3, Header{"content-length": {"3"}}, nil, []string{"content-length: 3"}},
+		{"uppercase with a wrong value", "POST", strings.NewReader("abc"), 3, Header{"CONTENT-LENGTH": {"99"}}, nil, []string{"CONTENT-LENGTH: 3"}},
+		{"two spellings", "POST", strings.NewReader("abc"), 3, Header{"content-length": {"3"}, "Content-length": {"3"}}, nil, []string{"Content-Length: 3"}},
+		{"GET drops it", "GET", nil, 0, Header{"content-length": {"3"}}, nil, nil},
+		{"lowercase transfer-encoding", "POST", io.MultiReader(strings.NewReader("abc")), -1, Header{"transfer-encoding": {"chunked"}}, nil, []string{"transfer-encoding: chunked"}},
+		{"lowercase trailer", "POST", io.MultiReader(strings.NewReader("abc")), -1, Header{"trailer": {"x"}}, Header{"X-Foo": nil}, []string{"Transfer-Encoding: chunked", "trailer: X-Foo"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := dummyRequest(tt.method)
+			req.Header, req.ContentLength, req.Trailer = tt.header, tt.length, tt.trailer
+			if tt.body != nil {
+				req.Body = io.NopCloser(tt.body)
+			}
+			var buf bytes.Buffer
+			if err := req.Write(&buf); err != nil {
+				t.Fatal(err)
+			}
+			head, _, _ := strings.Cut(buf.String(), "\r\n\r\n")
+			var got []string
+			for _, line := range strings.Split(head, "\r\n")[1:] {
+				name, _, _ := strings.Cut(line, ":")
+				switch strings.ToLower(name) {
+				case "content-length", "transfer-encoding", "trailer":
+					got = append(got, line)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("transfer headers %q, want %q\n%s", got, tt.want, head)
+			}
+		})
+	}
+}
