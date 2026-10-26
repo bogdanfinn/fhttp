@@ -4564,6 +4564,7 @@ type http2stream struct {
 	state http2streamState
 
 	trailer       Header      // accumulated trailers
+	readDeadline  *time.Timer // nil if unused
 	writeDeadline *time.Timer // nil if unused
 
 	wroteHeaders bool // whether we wrote headers (not status 100)
@@ -4882,6 +4883,8 @@ func (sc *http2serverConn) serve() {
 				}
 			case *http2startPushRequest:
 				sc.startPush(v)
+			case func(*http2serverConn):
+				v(sc)
 			default:
 				panic(fmt.Sprintf("unexpected type %T", v))
 			}
@@ -5507,6 +5510,9 @@ func (sc *http2serverConn) closeStream(st *http2stream, err error) {
 		panic(fmt.Sprintf("invariant; can't close stream in state %v", st.state))
 	}
 	st.state = http2stateClosed
+	if st.readDeadline != nil {
+		st.readDeadline.Stop()
+	}
 	if st.writeDeadline != nil {
 		st.writeDeadline.Stop()
 	}
@@ -5767,6 +5773,16 @@ func (st *http2stream) copyTrailersToHandlerRequest() {
 			// Only copy it over it was pre-declared.
 			st.reqTrailer[k] = vv
 		}
+	}
+}
+
+// onReadTimeout is run on its own goroutine (from time.AfterFunc)
+// when the stream's ReadTimeout has fired.
+func (st *http2stream) onReadTimeout() {
+	if st.body != nil {
+		// Wrap the ErrDeadlineExceeded to avoid callers depending on us
+		// returning the bare error.
+		st.body.CloseWithError(fmt.Errorf("%w", os.ErrDeadlineExceeded))
 	}
 }
 
@@ -6585,6 +6601,62 @@ func (rws *http2responseWriterState) promoteUndeclaredTrailers() {
 		sorter.SortStrings(rws.trailers)
 		http2sorterPool.Put(sorter)
 	}
+}
+
+func (w *http2responseWriter) SetReadDeadline(deadline time.Time) error {
+	st := w.rws.stream
+	if !deadline.IsZero() && deadline.Before(time.Now()) {
+		// If we're setting a deadline in the past, reset the stream immediately
+		// so writes after SetWriteDeadline returns will fail.
+		st.onReadTimeout()
+
+		return nil
+	}
+	w.rws.conn.sendServeMsg(func(sc *http2serverConn) {
+		if st.readDeadline != nil {
+			if !st.readDeadline.Stop() {
+				// Deadline already exceeded, or stream has been closed.
+				return
+			}
+		}
+		if deadline.IsZero() {
+			st.readDeadline = nil
+		} else if st.readDeadline == nil {
+			st.readDeadline = time.AfterFunc(deadline.Sub(time.Now()), st.onReadTimeout)
+		} else {
+			st.readDeadline.Reset(deadline.Sub(time.Now()))
+		}
+	})
+
+	return nil
+}
+
+func (w *http2responseWriter) SetWriteDeadline(deadline time.Time) error {
+	st := w.rws.stream
+	if !deadline.IsZero() && deadline.Before(time.Now()) {
+		// If we're setting a deadline in the past, reset the stream immediately
+		// so writes after SetWriteDeadline returns will fail.
+		st.onWriteTimeout()
+
+		return nil
+	}
+	w.rws.conn.sendServeMsg(func(sc *http2serverConn) {
+		if st.writeDeadline != nil {
+			if !st.writeDeadline.Stop() {
+				// Deadline already exceeded, or stream has been closed.
+				return
+			}
+		}
+		if deadline.IsZero() {
+			st.writeDeadline = nil
+		} else if st.writeDeadline == nil {
+			st.writeDeadline = time.AfterFunc(deadline.Sub(time.Now()), st.onWriteTimeout)
+		} else {
+			st.writeDeadline.Reset(deadline.Sub(time.Now()))
+		}
+	})
+
+	return nil
 }
 
 func (w *http2responseWriter) Flush() {
