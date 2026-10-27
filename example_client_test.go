@@ -328,13 +328,12 @@ func TestCompressionBrotli(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// HTTP/2 decodes the body even though the caller set Accept-Encoding, HTTP/1.1 only when it set it itself.
-	if resp.ProtoMajor == 2 {
-		if !resp.Uncompressed {
-			t.Fatal("brotli body was not decoded")
-		}
-	} else if h := resp.Header.Get("content-encoding"); h != "br" {
-		t.Fatalf("Got content-encoding header %v, expected br", h)
+	// Both protocols decode the body even though the caller set Accept-Encoding.
+	if !resp.Uncompressed {
+		t.Fatal("brotli body was not decoded")
+	}
+	if h := resp.Header.Get("content-encoding"); h != "" {
+		t.Fatalf("Got content-encoding header %v, expected none", h)
 	}
 }
 
@@ -370,9 +369,9 @@ func deflateServer(t *testing.T, zlibWrapped bool) *httptest.Server {
 	}))
 }
 
-// A caller that sets accept-encoding itself owns the decoding: the transport
-// must not decompress the body or strip Content-Encoding. Verify that, and
-// that the library decodes both deflate flavours.
+// The transport decodes by the response's Content-Encoding even when the caller
+// set accept-encoding itself, and strips the header. Verify that for both deflate
+// flavours.
 func testCompressionDeflate(t *testing.T, zlibWrapped bool) {
 	t.Helper()
 
@@ -393,11 +392,11 @@ func testCompressionDeflate(t *testing.T, zlibWrapped bool) {
 	}
 	defer resp.Body.Close()
 
-	if h := resp.Header.Get("content-encoding"); h != "deflate" {
-		t.Fatalf("Expected content encoding deflate, got %q", h)
+	if h := resp.Header.Get("content-encoding"); h != "" {
+		t.Fatalf("Expected no content encoding, got %q", h)
 	}
 
-	got, err := io.ReadAll(http.DecompressBodyByType(resp.Body, "deflate"))
+	got, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
