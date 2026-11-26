@@ -458,7 +458,7 @@ func (cs *clientStream) cancelStream() {
 	cs.didReset = true
 	cc.mu.Unlock()
 
-	if didReset {
+	if !didReset {
 		cc.writeStreamReset(cs.ID, ErrCodeCancel, nil)
 		cc.forgetStreamID(cs.ID)
 	}
@@ -1244,9 +1244,12 @@ func (cc *ClientConn) roundTrip(req *http.Request) (res *http.Response, gotErrAf
 	// we send: HEADERS{1}, CONTINUATION{0,} + DATA{0,} (DATA is
 	// sent by writeRequestBody below, along with any Trailers,
 	// again in form HEADERS{1}, CONTINUATION{0,})
-	hdrs, err := cc.encodeHeaders(req, requestedGzip, trailers, contentLen)
+	hdrs, isEncoderBroken, err := cc.encodeRequestHeaders(req, requestedGzip, trailers, contentLen)
 	if err != nil {
 		cc.mu.Unlock()
+		if isEncoderBroken {
+			go cc.Shutdown(context.Background())
+		}
 
 		return nil, false, err
 	}
@@ -1721,6 +1724,26 @@ func isNormalConnect(req *http.Request) bool {
 }
 
 // requires cc.mu be held.
+// encodeRequestHeaders encodes req's headers; cc.mu must be held. A panic in
+// the HPACK encoder used to unwind with cc.mu still held, which locked the
+// connection for good: its read loop and every later request waited forever.
+// After such a panic the encoder's dynamic table no longer matches the peer's,
+// so the connection takes no new requests (the caller shuts it down once its
+// streams finish) and the request fails with errClientConnUnusable, which
+// RoundTrip retries on another connection.
+func (cc *ClientConn) encodeRequestHeaders(req *http.Request, addGzipHeader bool, trailers string, contentLength int64) (hdrs []byte, isEncoderBroken bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cc.closing = true
+			cc.vlogf("http2: encoding request headers panicked, retiring connection: %v", r)
+			hdrs, isEncoderBroken, err = nil, true, errClientConnUnusable
+		}
+	}()
+	hdrs, err = cc.encodeHeaders(req, addGzipHeader, trailers, contentLength)
+
+	return hdrs, false, err
+}
+
 func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trailers string, contentLength int64) ([]byte, error) {
 	cc.hbuf.Reset()
 
